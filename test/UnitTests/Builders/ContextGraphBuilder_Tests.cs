@@ -1,151 +1,114 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using Humanizer;
+using JsonApiDotNetCore;
 using JsonApiDotNetCore.Builders;
 using JsonApiDotNetCore.Configuration;
-using JsonApiDotNetCore.Extensions;
-using JsonApiDotNetCore.Graph;
-using JsonApiDotNetCore.Internal;
+using JsonApiDotNetCore.Internal.Contracts;
 using JsonApiDotNetCore.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace UnitTests
 {
-    public class ResourceGraphBuilder_Tests
+    public sealed class ResourceGraphBuilder_Tests
     {
-        class NonDbResource : Identifiable {}
-        class DbResource : Identifiable {}
-        class TestContext : DbContext {
-            public DbSet<DbResource> DbResources { get; set; }
-        }
+        private sealed class NonDbResource : Identifiable { }
 
-        public ResourceGraphBuilder_Tests()
+        private sealed class DbResource : Identifiable { }
+
+        private class TestContext : DbContext
         {
-            JsonApiOptions.ResourceNameFormatter = new DefaultResourceNameFormatter();
+            public DbSet<DbResource> DbResources { get; set; }
+
+            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+            {
+                optionsBuilder.UseInMemoryDatabase(Guid.NewGuid().ToString());
+            }
         }
 
         [Fact]
         public void Can_Build_ResourceGraph_Using_Builder()
         {
-            // arrange
+            // Arrange
             var services = new ServiceCollection();
-            services.AddJsonApi<TestContext>(opt => {
-                opt.BuildResourceGraph(b => {
-                    b.AddResource<NonDbResource>("non-db-resources");
-                });
-            });
+            services.AddLogging();
+            services.AddDbContext<TestContext>();
+            
+            services.AddJsonApi<TestContext>(resources: builder => builder.AddResource<NonDbResource>("nonDbResources"));
 
-            // act
+            // Act
             var container = services.BuildServiceProvider();
 
-            // assert
+            // Assert
             var resourceGraph = container.GetRequiredService<IResourceGraph>();
-            var dbResource = resourceGraph.GetContextEntity("db-resources");
-            var nonDbResource = resourceGraph.GetContextEntity("non-db-resources");
-            Assert.Equal(typeof(DbResource), dbResource.EntityType);
-            Assert.Equal(typeof(NonDbResource), nonDbResource.EntityType);
-            Assert.Equal(typeof(ResourceDefinition<NonDbResource>), nonDbResource.ResourceType);
-        }
-
-        [Fact]
-        public void Resources_Without_Names_Specified_Will_Use_Default_Formatter()
-        {
-            // arrange
-            var builder = new ResourceGraphBuilder();
-            builder.AddResource<TestResource>();
-
-            // act
-            var graph = builder.Build();
-
-            // assert
-            var resource = graph.GetContextEntity(typeof(TestResource));
-            Assert.Equal("test-resources", resource.EntityName);
+            var dbResource = resourceGraph.GetResourceContext("dbResources");
+            var nonDbResource = resourceGraph.GetResourceContext("nonDbResources");
+            Assert.Equal(typeof(DbResource), dbResource.ResourceType);
+            Assert.Equal(typeof(NonDbResource), nonDbResource.ResourceType);
+            Assert.Equal(typeof(ResourceDefinition<NonDbResource>), nonDbResource.ResourceDefinitionType);
         }
 
         [Fact]
         public void Resources_Without_Names_Specified_Will_Use_Configured_Formatter()
         {
-            // arrange
-            JsonApiOptions.ResourceNameFormatter = new CamelCaseNameFormatter();
-            var builder = new ResourceGraphBuilder();
+            // Arrange
+            var builder = new ResourceGraphBuilder(new JsonApiOptions(), NullLoggerFactory.Instance);
             builder.AddResource<TestResource>();
 
-            // act
-            var graph = builder.Build();
+            // Act
+            var resourceGraph = builder.Build();
 
-            // assert
-            var resource = graph.GetContextEntity(typeof(TestResource));
-            Assert.Equal("testResources", resource.EntityName);
-        }
-
-        [Fact]
-        public void Attrs_Without_Names_Specified_Will_Use_Default_Formatter()
-        {
-            // arrange
-            var builder = new ResourceGraphBuilder();
-            builder.AddResource<TestResource>();
-
-            // act
-            var graph = builder.Build();
-
-            // assert
-            var resource = graph.GetContextEntity(typeof(TestResource));
-            Assert.Equal("compound-attribute", resource.Attributes.Single().PublicAttributeName);
+            // Assert
+            var resource = resourceGraph.GetResourceContext(typeof(TestResource));
+            Assert.Equal("testResources", resource.ResourceName);
         }
 
         [Fact]
         public void Attrs_Without_Names_Specified_Will_Use_Configured_Formatter()
         {
-            // arrange
-            JsonApiOptions.ResourceNameFormatter = new CamelCaseNameFormatter();
-            var builder = new ResourceGraphBuilder();
+            // Arrange
+            var builder = new ResourceGraphBuilder(new JsonApiOptions(), NullLoggerFactory.Instance);
             builder.AddResource<TestResource>();
 
-            // act
-            var graph = builder.Build();
+            // Act
+            var resourceGraph = builder.Build();
 
-            // assert
-            var resource = graph.GetContextEntity(typeof(TestResource));
-            Assert.Equal("compoundAttribute", resource.Attributes.Single().PublicAttributeName);
+            // Assert
+            var resource = resourceGraph.GetResourceContext(typeof(TestResource));
+            Assert.Contains(resource.Attributes, (i) => i.PublicAttributeName == "compoundAttribute");
         }
 
         [Fact]
-        public void Relationships_Without_Names_Specified_Will_Use_Default_Formatter()
+        public void Relationships_Without_Names_Specified_Will_Use_Configured_Formatter()
         {
-            // arrange
-            var builder = new ResourceGraphBuilder();
+            // Arrange
+            var builder = new ResourceGraphBuilder(new JsonApiOptions(), NullLoggerFactory.Instance);
             builder.AddResource<TestResource>();
 
-            // act
-            var graph = builder.Build();
+            // Act
+            var resourceGraph = builder.Build();
 
-            // assert
-            var resource = graph.GetContextEntity(typeof(TestResource));
-            Assert.Equal("related-resource", resource.Relationships.Single(r => r.IsHasOne).PublicRelationshipName);
-            Assert.Equal("related-resources", resource.Relationships.Single(r => r.IsHasMany).PublicRelationshipName);
+            // Assert
+            var resource = resourceGraph.GetResourceContext(typeof(TestResource));
+            Assert.Equal("relatedResource", resource.Relationships.Single(r => r is HasOneAttribute).PublicRelationshipName);
+            Assert.Equal("relatedResources", resource.Relationships.Single(r => !(r is HasOneAttribute)).PublicRelationshipName);
         }
 
-        public class TestResource : Identifiable {
-            [Attr] public string CompoundAttribute { get; set; }
-            [HasOne] public RelatedResource RelatedResource { get; set; }
-            [HasMany] public List<RelatedResource> RelatedResources { get; set; }
+        public sealed class TestResource : Identifiable
+        {
+            [Attr] 
+            public string CompoundAttribute { get; set; }
+            
+            [HasOne] 
+            public RelatedResource RelatedResource { get; set; }
+            
+            [HasMany] 
+            public ISet<RelatedResource> RelatedResources { get; set; }
         }
 
         public class RelatedResource : Identifiable { }
-
-        public class CamelCaseNameFormatter : IResourceNameFormatter
-        {
-            public string ApplyCasingConvention(string properName) => ToCamelCase(properName);
-
-            public string FormatPropertyName(PropertyInfo property) => ToCamelCase(property.Name);
-
-            public string FormatResourceName(Type resourceType) => ToCamelCase(resourceType.Name.Pluralize());
-
-            private string ToCamelCase(string str) => Char.ToLowerInvariant(str[0]) + str.Substring(1);
-        }
     }
 }

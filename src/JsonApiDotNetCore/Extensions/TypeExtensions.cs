@@ -3,93 +3,98 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 
 namespace JsonApiDotNetCore.Extensions
 {
     internal static class TypeExtensions
     {
-        public static Type GetElementType(this IEnumerable enumerable)
+        /// <summary>
+        /// Extension to use the LINQ cast method in a non-generic way:
+        /// <code>
+        /// Type targetType = typeof(TResource)
+        /// ((IList)myList).CopyToList(targetType).
+        /// </code>
+        /// </summary>
+        public static IList CopyToList(this IEnumerable copyFrom, Type elementType, Converter<object, object> elementConverter = null)
         {
-            var enumerableTypes = enumerable.GetType()
-                .GetInterfaces()
-                .Where(t => t.IsGenericType == true && t.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-                .ToList();
+            Type collectionType = typeof(List<>).MakeGenericType(elementType);
 
-            var numberOfEnumerableTypes = enumerableTypes.Count;
-
-            if (numberOfEnumerableTypes == 0)
+            if (elementConverter != null)
             {
-                throw new ArgumentException($"{nameof(enumerable)} of type {enumerable.GetType().FullName} does not implement a generic variant of {nameof(IEnumerable)}");
+                var converted = copyFrom.Cast<object>().Select(element => elementConverter(element));
+                return (IList) CopyToTypedCollection(converted, collectionType);
             }
 
-            if (numberOfEnumerableTypes > 1)
-            {
-                throw new ArgumentException($"{nameof(enumerable)} of type {enumerable.GetType().FullName} implements more than one generic variant of {nameof(IEnumerable)}:\n" +
-                    $"{string.Join("\n", enumerableTypes.Select(t => t.FullName))}");
-            }
-
-            var elementType = enumerableTypes[0].GenericTypeArguments[0];
-
-            return elementType;
+            return (IList)CopyToTypedCollection(copyFrom, collectionType);
         }
 
         /// <summary>
-        /// Creates a List{TInterface} where TInterface is the generic for type specified by t
+        /// Creates a collection instance based on the specified collection type and copies the specified elements into it.
         /// </summary>
-        public static IEnumerable GetEmptyCollection(this Type t)
+        /// <param name="source">Source to copy from.</param>
+        /// <param name="collectionType">Target collection type, for example: typeof(List{Article}) or typeof(ISet{Person}).</param>
+        /// <returns></returns>
+        public static IEnumerable CopyToTypedCollection(this IEnumerable source, Type collectionType)
         {
-            if (t == null) throw new ArgumentNullException(nameof(t));
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (collectionType == null) throw new ArgumentNullException(nameof(collectionType));
 
-            var listType = typeof(List<>).MakeGenericType(t);
-            var list = (IEnumerable)Activator.CreateInstance(listType);
-            return list;
-        }
+            var concreteCollectionType = collectionType.ToConcreteCollectionType();
+            dynamic concreteCollectionInstance = TypeHelper.CreateInstance(concreteCollectionType);
 
-        /// <summary>
-        /// Creates a new instance of type t, casting it to the specified TInterface 
-        /// </summary>
-        public static TInterface New<TInterface>(this Type t)
-        {
-            if (t == null) throw new ArgumentNullException(nameof(t));
-
-            var instance = (TInterface)CreateNewInstance(t);
-            return instance;
-        }
-
-        private static object CreateNewInstance(Type type)
-        {
-            try
+            foreach (var item in source)
             {
-                return Activator.CreateInstance(type);
+                concreteCollectionInstance.Add((dynamic) item);
             }
-            catch (Exception e)
-            {
-                throw new JsonApiException(500, $"Type '{type}' cannot be instantiated using the default constructor.", e);
-            }
+
+            return concreteCollectionInstance;
         }
 
         /// <summary>
-        /// Whether or not a type implements an interface.
+        /// Whether the specified source type implements or equals the specified interface.
         /// </summary>
-        public static bool Implements<T>(this Type concreteType) 
-            => Implements(concreteType, typeof(T));
+        public static bool IsOrImplementsInterface(this Type source, Type interfaceType)
+        {
+            if (interfaceType == null)
+            {
+                throw new ArgumentNullException(nameof(interfaceType));
+            }
 
-        /// <summary>
-        /// Whether or not a type implements an interface.
-        /// </summary>
-        public static bool Implements(this Type concreteType, Type interfaceType) 
-            => interfaceType?.IsAssignableFrom(concreteType) == true;
+            if (source == null)
+            {
+                return false;
+            }
 
-        /// <summary>
-        /// Whether or not a type inherits a base type.
-        /// </summary>
-        public static bool Inherits<T>(this Type concreteType) 
-            => Inherits(concreteType, typeof(T));
+            return source == interfaceType || source.GetInterfaces().Any(type => type == interfaceType);
+        }
 
-        /// <summary>
-        /// Whether or not a type inherits a base type.
-        /// </summary>
-        public static bool Inherits(this Type concreteType, Type interfaceType) 
-            => interfaceType?.IsAssignableFrom(concreteType) == true;
+        public static bool HasSingleConstructorWithoutParameters(this Type type)
+        {
+            ConstructorInfo[] constructors = type.GetConstructors().Where(c => !c.IsStatic).ToArray();
+
+            return constructors.Length == 1 && constructors[0].GetParameters().Length == 0;
+        }
+
+        public static ConstructorInfo GetLongestConstructor(this Type type)
+        {
+            ConstructorInfo[] constructors = type.GetConstructors().Where(c => !c.IsStatic).ToArray();
+
+            ConstructorInfo bestMatch = constructors[0];
+            int maxParameterLength = constructors[0].GetParameters().Length;
+
+            for (int index = 1; index < constructors.Length; index++)
+            {
+                var constructor = constructors[index];
+                int length = constructor.GetParameters().Length;
+                if (length > maxParameterLength)
+                {
+                    bestMatch = constructor;
+                    maxParameterLength = length;
+                }
+            }
+
+            return bestMatch;
+        }
     }
 }

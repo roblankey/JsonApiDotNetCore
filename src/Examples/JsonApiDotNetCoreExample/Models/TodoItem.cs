@@ -1,47 +1,85 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using JsonApiDotNetCore.Models;
 
 namespace JsonApiDotNetCoreExample.Models
 {
-    public class TodoItem : Identifiable
+    public class TodoItem : Identifiable, IIsLockable
     {
         public TodoItem()
         {
             GuidProperty = Guid.NewGuid();
         }
 
-        [Attr("description")]
+        public bool IsLocked { get; set; }
+
+        [Attr]
         public string Description { get; set; }
 
-        [Attr("ordinal")]
+        [Attr]
         public long Ordinal { get; set; }
 
-        [Attr("guid-property")]
+        [Attr]
         public Guid GuidProperty { get; set; }
 
-        [Attr("created-date")]
+        [Attr]
+        public string AlwaysChangingValue
+        {
+            get => Guid.NewGuid().ToString();
+            set { }
+        }
+
+        [Attr]
         public DateTime CreatedDate { get; set; }
 
-        [Attr("achieved-date", isFilterable: false, isSortable: false)]
+        [Attr(AttrCapabilities.All & ~(AttrCapabilities.AllowFilter | AttrCapabilities.AllowSort))]
         public DateTime? AchievedDate { get; set; }
 
-
-        [Attr("updated-date")]
+        [Attr]
         public DateTime? UpdatedDate { get; set; }
 
+        [Attr(AttrCapabilities.All & ~AttrCapabilities.AllowMutate)]
+        public string CalculatedValue => "calculated";
 
-        
+        [Attr]
+        public DateTimeOffset? OffsetDate { get; set; }
+ 
         public int? OwnerId { get; set; }
+
         public int? AssigneeId { get; set; }
+
         public Guid? CollectionId { get; set; }
 
-        [HasOne("owner")]
-        public virtual Person Owner { get; set; }
+        [HasOne]
+        public Person Owner { get; set; }
 
-        [HasOne("assignee")]
-        public virtual Person Assignee { get; set; }
+        [HasOne]
+        public Person Assignee { get; set; }
 
-        [HasOne("collection")]
-        public virtual TodoItemCollection Collection { get; set; }
+        [HasOne]
+        public Person OneToOnePerson { get; set; }
+
+        public int? OneToOnePersonId { get; set; }
+
+        [HasMany]
+        public ISet<Person> StakeHolders { get; set; }
+
+        [HasOne]
+        public TodoItemCollection Collection { get; set; }
+
+        // cyclical to-one structure
+        public int? DependentOnTodoId { get; set; }
+
+        [HasOne]
+        public TodoItem DependentOnTodo { get; set; }
+
+        // cyclical to-many structure
+        public int? ParentTodoId {get; set;}
+
+        [HasOne]
+        public TodoItem ParentTodo { get; set; }
+
+        [HasMany]
+        public IList<TodoItem> ChildrenTodos { get; set; }
     }
 }

@@ -1,38 +1,55 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using GettingStarted.Data;
+using GettingStarted.Models;
+using JsonApiDotNetCore;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
-using JsonApiDotNetCore.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GettingStarted
 {
-    public class Startup
+    public sealed class Startup
     {
+        // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddDbContext<SampleDbContext>(options =>
-            {
-                options.UseSqlite("Data Source=sample.db");
-            });
+            services.AddDbContext<SampleDbContext>(
+                options => options.UseSqlite("Data Source=sample.db"));
 
-            var mvcCoreBuilder = services.AddMvcCore();
-            services.AddJsonApi(
-                options => options.Namespace = "api", 
-                mvcCoreBuilder, 
-                discover => discover.AddCurrentAssembly());
+            services.AddJsonApi<SampleDbContext>(
+                options => options.Namespace = "api");
         }
 
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env, SampleDbContext context)
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void Configure(IApplicationBuilder app, SampleDbContext context)
         {
-            context.Database.EnsureDeleted(); // indicies need to be reset
+            context.Database.EnsureDeleted();
             context.Database.EnsureCreated();
+            CreateSampleData(context);
 
+            app.UseRouting();
             app.UseJsonApi();
+            app.UseEndpoints(endpoints => endpoints.MapControllers());
+        }
+
+        private static void CreateSampleData(SampleDbContext context)
+        {
+            context.Articles.AddRange(new Article
+            {
+                Title = "What's new in JsonApiDotNetCore",
+                Author = new Person
+                {
+                    Name = "John Doe"
+                }
+            }, new Article
+            {
+                Title = ".NET Core Best Practices",
+                Author = new Person
+                {
+                    Name = "Microsoft"
+                }
+            });
+
+            context.SaveChanges();
         }
     }
 }

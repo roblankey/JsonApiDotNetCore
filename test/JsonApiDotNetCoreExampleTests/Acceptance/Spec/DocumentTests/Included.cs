@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Bogus;
 using JsonApiDotNetCore.Models;
+using JsonApiDotNetCore.Models.JsonApiDocuments;
 using JsonApiDotNetCoreExample;
 using JsonApiDotNetCoreExample.Data;
 using JsonApiDotNetCoreExample.Models;
@@ -17,17 +18,15 @@ using Person = JsonApiDotNetCoreExample.Models.Person;
 namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
 {
     [Collection("WebHostCollection")]
-    public class Included
+    public sealed class Included
     {
-        private TestFixture<TestStartup> _fixture;
-        private AppDbContext _context;
-        private Bogus.Faker<Person> _personFaker;
-        private Faker<TodoItem> _todoItemFaker;
-        private Faker<TodoItemCollection> _todoItemCollectionFaker;
+        private readonly AppDbContext _context;
+        private readonly Faker<Person> _personFaker;
+        private readonly Faker<TodoItem> _todoItemFaker;
+        private readonly Faker<TodoItemCollection> _todoItemCollectionFaker;
 
         public Included(TestFixture<TestStartup> fixture)
         {
-            _fixture = fixture;
             _context = fixture.GetService<AppDbContext>();
             _personFaker = new Faker<Person>()
                 .RuleFor(p => p.FirstName, f => f.Name.FirstName())
@@ -43,9 +42,9 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
         }
 
         [Fact]
-        public async Task GET_Included_Contains_SideloadedData_ForManyToOne()
+        public async Task GET_Included_Contains_SideLoadedData_ForManyToOne()
         {
-            // arrange
+            // Arrange
             var person = _personFaker.Generate();
             var todoItem = _todoItemFaker.Generate();
             todoItem.Owner = person;
@@ -53,33 +52,37 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             _context.TodoItems.Add(todoItem);
             _context.SaveChanges();
 
-            var builder = new WebHostBuilder().UseStartup<Startup>();
+            var builder = new WebHostBuilder().UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
-            var route = $"/api/v1/todo-items?include=owner";
+            var route = "/api/v1/todoItems?include=owner";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
 
-            // assert
+            // Assert
             var json = await response.Content.ReadAsStringAsync();
-            var documents = JsonConvert.DeserializeObject<Documents>(json);
-            // we only care about counting the todo-items that have owners
-            var expectedCount = documents.Data.Count(d => d.Relationships["owner"].SingleData != null);
+            var documents = JsonConvert.DeserializeObject<Document>(json);
+            // we only care about counting the todoItems that have owners
+            var expectedCount = documents.ManyData.Count(d => d.Relationships["owner"].SingleData != null);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotEmpty(documents.Included);
             Assert.Equal(expectedCount, documents.Included.Count);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
 
         [Fact]
-        public async Task GET_ById_Included_Contains_SideloadedData_ForManyToOne()
+        public async Task GET_ById_Included_Contains_SideLoadedData_ForManyToOne()
         {
-            // arrange
+            // Arrange
             var person = _personFaker.Generate();
             var todoItem = _todoItemFaker.Generate();
             todoItem.Owner = person;
@@ -87,34 +90,38 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             _context.SaveChanges();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
 
-            var route = $"/api/v1/todo-items/{todoItem.Id}?include=owner";
+            var route = $"/api/v1/todoItems/{todoItem.Id}?include=owner";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseString = await response.Content.ReadAsStringAsync();
             var document = JsonConvert.DeserializeObject<Document>(responseString);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotEmpty(document.Included);
             Assert.Equal(person.Id.ToString(), document.Included[0].Id);
-            Assert.Equal(person.FirstName, document.Included[0].Attributes["first-name"]);
-            Assert.Equal(person.LastName, document.Included[0].Attributes["last-name"]);
+            Assert.Equal(person.FirstName, document.Included[0].Attributes["firstName"]);
+            Assert.Equal(person.LastName, document.Included[0].Attributes["lastName"]);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
 
         [Fact]
-        public async Task GET_Included_Contains_SideloadedData_OneToMany()
+        public async Task GET_Included_Contains_SideLoadedData_OneToMany()
         {
-            // arrange
-            _context.People.RemoveRange(_context.People); // ensure all people have todo-items
+            // Arrange
+            _context.People.RemoveRange(_context.People); // ensure all people have todoItems
             _context.TodoItems.RemoveRange(_context.TodoItems);
             var person = _personFaker.Generate();
             var todoItem = _todoItemFaker.Generate();
@@ -123,32 +130,37 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             _context.SaveChanges();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
-            var route = $"/api/v1/people?include=todo-items";
+            var route = "/api/v1/people?include=todoItems";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
-            var documents = JsonConvert.DeserializeObject<Documents>(await response.Content.ReadAsStringAsync());
-            var data = documents.Data[0];
+            var documents = JsonConvert.DeserializeObject<Document>(await response.Content.ReadAsStringAsync());
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotEmpty(documents.Included);
-            Assert.Equal(documents.Data.Count, documents.Included.Count);
+            Assert.Equal(documents.ManyData.Count, documents.Included.Count);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
 
         [Fact]
         public async Task GET_Included_DoesNot_Duplicate_Records_ForMultipleRelationshipsOfSameType()
         {
-            // arrange
-            _context.People.RemoveRange(_context.People); // ensure all people have todo-items
-            _context.TodoItems.RemoveRange(_context.TodoItems);
+            // Arrange
+            _context.RemoveRange(_context.TodoItems);
+            _context.RemoveRange(_context.TodoItemCollections);
+            _context.RemoveRange(_context.People); // ensure all people have todoItems
+            _context.SaveChanges();
             var person = _personFaker.Generate();
             var todoItem = _todoItemFaker.Generate();
             todoItem.Owner = person;
@@ -157,65 +169,72 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             _context.SaveChanges();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
-            var route = $"/api/v1/todo-items/{todoItem.Id}?include=owner&include=assignee";
+            var route = $"/api/v1/todoItems/{todoItem.Id}?include=owner&include=assignee";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var documents = JsonConvert.DeserializeObject<Document>(await response.Content.ReadAsStringAsync());
-            var data = documents.Data;
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotEmpty(documents.Included);
             Assert.Single(documents.Included);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
 
         [Fact]
         public async Task GET_Included_DoesNot_Duplicate_Records_If_HasOne_Exists_Twice()
         {
-            // arrange
-            _context.People.RemoveRange(_context.People); // ensure all people have todo-items
+            // Arrange
+            _context.TodoItemCollections.RemoveRange(_context.TodoItemCollections);
+            _context.People.RemoveRange(_context.People); // ensure all people have todoItems
             _context.TodoItems.RemoveRange(_context.TodoItems);
             var person = _personFaker.Generate();
             var todoItem1 = _todoItemFaker.Generate();
             var todoItem2 = _todoItemFaker.Generate();
             todoItem1.Owner = person;
             todoItem2.Owner = person;
-            _context.TodoItems.AddRange(new[] { todoItem1, todoItem2 });
+            _context.TodoItems.AddRange(todoItem1, todoItem2);
             _context.SaveChanges();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
-            var route = $"/api/v1/todo-items?include=owner";
+            var route = "/api/v1/todoItems?include=owner";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
-            var documents = JsonConvert.DeserializeObject<Documents>(await response.Content.ReadAsStringAsync());
-            var data = documents.Data;
+            var documents = JsonConvert.DeserializeObject<Document>(await response.Content.ReadAsStringAsync());
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotEmpty(documents.Included);
             Assert.Single(documents.Included);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
 
         [Fact]
-        public async Task GET_ById_Included_Contains_SideloadedData_ForOneToMany()
+        public async Task GET_ById_Included_Contains_SideloadeData_ForOneToMany()
         {
-            // arrange
+            // Arrange
             const int numberOfTodoItems = 5;
             var person = _personFaker.Generate();
             for (var i = 0; i < numberOfTodoItems; i++)
@@ -227,31 +246,35 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             }
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
 
-            var route = $"/api/v1/people/{person.Id}?include=todo-items";
+            var route = $"/api/v1/people/{person.Id}?include=todoItems";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseString = await response.Content.ReadAsStringAsync();
             var document = JsonConvert.DeserializeObject<Document>(responseString);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotEmpty(document.Included);
             Assert.Equal(numberOfTodoItems, document.Included.Count);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
 
         [Fact]
         public async Task Can_Include_MultipleRelationships()
         {
-            // arrange
+            // Arrange
             var person = _personFaker.Generate();
             var todoItemCollection = _todoItemCollectionFaker.Generate();
             todoItemCollection.Owner = person;
@@ -267,148 +290,179 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             }
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
 
-            var route = $"/api/v1/people/{person.Id}?include=todo-items,todo-collections";
+            var route = $"/api/v1/people/{person.Id}?include=todoItems,todoCollections";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseString = await response.Content.ReadAsStringAsync();
             var document = JsonConvert.DeserializeObject<Document>(responseString);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotEmpty(document.Included);
             Assert.Equal(numberOfTodoItems + 1, document.Included.Count);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
 
         [Fact]
         public async Task Request_ToIncludeUnknownRelationship_Returns_400()
         {
-            // arrange
+            // Arrange
             var person = _context.People.First();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
 
-            var route = $"/api/v1/people/{person.Id}?include=non-existent-relationship";
+            var route = $"/api/v1/people/{person.Id}?include=nonExistentRelationship";
 
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-            var request = new HttpRequestMessage(httpMethod, route);
+            using var server = new TestServer(builder);
+            using var client = server.CreateClient();
+            using var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
 
-            // assert
+            // Assert
+            var body = await response.Content.ReadAsStringAsync();
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(body);
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal(HttpStatusCode.BadRequest, errorDocument.Errors[0].StatusCode);
+            Assert.Equal("The requested relationship to include does not exist.", errorDocument.Errors[0].Title);
+            Assert.Equal("The relationship 'nonExistentRelationship' on 'people' does not exist.", errorDocument.Errors[0].Detail);
         }
 
         [Fact]
         public async Task Request_ToIncludeDeeplyNestedRelationships_Returns_400()
         {
-            // arrange
+            // Arrange
             var person = _context.People.First();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
 
             var route = $"/api/v1/people/{person.Id}?include=owner.name";
 
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-            var request = new HttpRequestMessage(httpMethod, route);
+            using var server = new TestServer(builder);
+            using var client = server.CreateClient();
+            using var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
 
-            // assert
+            // Assert
+            var body = await response.Content.ReadAsStringAsync();
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(body);
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal(HttpStatusCode.BadRequest, errorDocument.Errors[0].StatusCode);
+            Assert.Equal("The requested relationship to include does not exist.", errorDocument.Errors[0].Title);
+            Assert.Equal("The relationship 'owner' on 'people' does not exist.", errorDocument.Errors[0].Detail);
         }
 
         [Fact]
         public async Task Request_ToIncludeRelationshipMarkedCanIncludeFalse_Returns_400()
         {
-            // arrange
+            // Arrange
             var person = _context.People.First();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
 
-            var route = $"/api/v1/people/{person.Id}?include=unincludeable-item";
+            var route = $"/api/v1/people/{person.Id}?include=unincludeableItem";
 
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-            var request = new HttpRequestMessage(httpMethod, route);
+            using var server = new TestServer(builder);
+            using var client = server.CreateClient();
+            using var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
 
-            // assert
+            // Assert
+            var body = await response.Content.ReadAsStringAsync();
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(body);
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal(HttpStatusCode.BadRequest, errorDocument.Errors[0].StatusCode);
+            Assert.Equal("The requested relationship to include does not exist.", errorDocument.Errors[0].Title);
+            Assert.Equal("The relationship 'unincludeableItem' on 'people' does not exist.", errorDocument.Errors[0].Detail);
         }
 
         [Fact]
         public async Task Can_Ignore_Null_Parent_In_Nested_Include()
         {
-            // arrange
+            // Arrange
+            _context.TodoItems.RemoveRange(_context.TodoItems);
+            
             var todoItem = _todoItemFaker.Generate();
             todoItem.Owner = _personFaker.Generate();
-            todoItem.CreatedDate = DateTime.Now;
+            todoItem.CreatedDate = new DateTime(2002, 2,2);
             _context.TodoItems.Add(todoItem);
             _context.SaveChanges();
 
             var todoItemWithNullOwner = _todoItemFaker.Generate();
             todoItemWithNullOwner.Owner = null;
-            todoItemWithNullOwner.CreatedDate = DateTime.Now;
+            todoItemWithNullOwner.CreatedDate = new DateTime(2002, 2,2);
             _context.TodoItems.Add(todoItemWithNullOwner);
             _context.SaveChanges();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var httpMethod = new HttpMethod("GET");
           
-            var route = $"/api/v1/todo-items?sort=-created-date&page[size]=2&include=owner.role"; // last two todo-items
+            var route = "/api/v1/todoItems?sort=-createdDate&page[size]=2&include=owner.role"; // last two todoItems
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseString = await response.Content.ReadAsStringAsync();
-            var documents = JsonConvert.DeserializeObject<Documents>(responseString);
+            var documents = JsonConvert.DeserializeObject<Document>(responseString);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Single(documents.Included);
 
-            var ownerValueNull = documents.Data
+            var ownerValueNull = documents.ManyData
                 .First(i => i.Id == todoItemWithNullOwner.StringId)
                 .Relationships.First(i => i.Key == "owner")
                 .Value.SingleData;
 
             Assert.Null(ownerValueNull);
 
-            var ownerValue = documents.Data
+            var ownerValue = documents.ManyData
                 .First(i => i.Id == todoItem.StringId)
                 .Relationships.First(i => i.Key == "owner")
                 .Value.SingleData;
 
             Assert.NotNull(ownerValue);
+
+            server.Dispose();
+            request.Dispose();
+            response.Dispose();
         }
     }
 }

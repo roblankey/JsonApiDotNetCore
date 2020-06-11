@@ -3,59 +3,86 @@ using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
 using Bogus;
+using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Models;
-using JsonApiDotNetCore.Serialization;
+using JsonApiDotNetCoreExample;
 using JsonApiDotNetCoreExample.Models;
+using Newtonsoft.Json;
 using Xunit;
 using Person = JsonApiDotNetCoreExample.Models.Person;
 
 namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec
 {
-    public class PagingTests : TestFixture<TestStartup>
+    [Collection("WebHostCollection")]
+    public sealed class PagingTests : TestFixture<TestStartup>
     {
-        private readonly Faker<TodoItem> _todoItemFaker = new Faker<TodoItem>()
+        private readonly TestFixture<TestStartup> _fixture;
+        private readonly Faker<TodoItem> _todoItemFaker;
+
+        public PagingTests(TestFixture<TestStartup> fixture)
+        {
+            _fixture = fixture;
+            _todoItemFaker = new Faker<TodoItem>()
             .RuleFor(t => t.Description, f => f.Lorem.Sentence())
             .RuleFor(t => t.Ordinal, f => f.Random.Number())
             .RuleFor(t => t.CreatedDate, f => f.Date.Past());
+        }
 
-        [Fact]
-        public async Task Can_Paginate_TodoItems()
+        [Theory]
+        [InlineData(1)]
+        [InlineData(-1)]
+        public async Task Pagination_WithPageSizeAndPageNumber_ReturnsCorrectSubsetOfResources(int pageNum)
         {
             // Arrange
             const int expectedEntitiesPerPage = 2;
             var totalCount = expectedEntitiesPerPage * 2;
             var person = new Person();
             var todoItems = _todoItemFaker.Generate(totalCount);
-
             foreach (var todoItem in todoItems)
+            {
                 todoItem.Owner = person;
-
+            }
+            Context.TodoItems.RemoveRange(Context.TodoItems);
             Context.TodoItems.AddRange(todoItems);
             Context.SaveChanges();
 
-            var route = $"/api/v1/todo-items?page[size]={expectedEntitiesPerPage}";
-
             // Act
+            var route = $"/api/v1/todoItems?page[size]={expectedEntitiesPerPage}&page[number]={pageNum}";
             var response = await Client.GetAsync(route);
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             var body = await response.Content.ReadAsStringAsync();
-            var deserializedBody = GetService<IJsonApiDeSerializer>().DeserializeList<TodoItem>(body);
+            var deserializedBody = _fixture.GetDeserializer().DeserializeList<TodoItem>(body).Data;
 
-            Assert.NotEmpty(deserializedBody);
-            Assert.Equal(expectedEntitiesPerPage, deserializedBody.Count);
+            if (pageNum < 0)
+            {
+                todoItems.Reverse();
+            }
+            var expectedTodoItems = todoItems.Take(expectedEntitiesPerPage).ToList();
+            Assert.Equal(expectedTodoItems, deserializedBody, new IdComparer<TodoItem>());
+
         }
 
-        [Fact]
-        public async Task Can_Paginate_TodoItems_From_Start()
+        [Theory]
+        [InlineData(1, 1, 1, null, 2, 4)]
+        [InlineData(2, 2, 1, 1, 3, 4)]
+        [InlineData(3, 3, 1, 2, 4, 4)]
+        [InlineData(4, 4, 1, 3, null, 4)]
+        [InlineData(-1, -1, -1, null, -2, -4)]
+        [InlineData(-2, -2, -1, -1, -3, -4)]
+        [InlineData(-3, -3, -1, -2, -4, -4)]
+        [InlineData(-4, -4, -1, -3, null, -4)]
+        public async Task Pagination_OnGivenPage_DisplaysCorrectTopLevelLinks(int pageNum, int selfLink, int? firstLink, int? prevLink, int? nextLink, int? lastLink)
         {
             // Arrange
-            const int expectedEntitiesPerPage = 2;
-            var totalCount = expectedEntitiesPerPage * 2;
-            var person = new Person();
-            var todoItems = _todoItemFaker.Generate(totalCount).ToList();
+            var totalCount = 20;
+            var person = new Person
+            {
+                LastName = "&Ampersand"
+            };
+            var todoItems = _todoItemFaker.Generate(totalCount);
 
             foreach (var todoItem in todoItems)
                 todoItem.Owner = person;
@@ -64,58 +91,65 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec
             Context.TodoItems.AddRange(todoItems);
             Context.SaveChanges();
 
-            var route = $"/api/v1/todo-items?page[size]={expectedEntitiesPerPage}&page[number]=1";
+            var options = GetService<IJsonApiOptions>();
+            options.AllowCustomQueryStringParameters = true;
+
+            string routePrefix = "/api/v1/todoItems?filter[owner.lastName]=" + WebUtility.UrlEncode(person.LastName) + 
+                                 "&fields[owner]=firstName&include=owner&sort=ordinal&foo=bar,baz";
+            string route = pageNum != 1 ? routePrefix + $"&page[size]=5&page[number]={pageNum}" : routePrefix;
 
             // Act
             var response = await Client.GetAsync(route);
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
             var body = await response.Content.ReadAsStringAsync();
-            var deserializedBody = GetService<IJsonApiDeSerializer>().DeserializeList<TodoItem>(body);
+            var links = JsonConvert.DeserializeObject<Document>(body).Links;
 
-            var expectedTodoItems = new[] { todoItems[0], todoItems[1] };
-            Assert.Equal(expectedTodoItems, deserializedBody, new IdComparer<TodoItem>());
+            Assert.EndsWith($"{routePrefix}&page[size]=5&page[number]={selfLink}", links.Self);
+            if (firstLink.HasValue)
+            {
+                Assert.EndsWith($"{routePrefix}&page[size]=5&page[number]={firstLink.Value}", links.First);
+            }
+            else
+            {
+                Assert.Null(links.First);
+            }
+
+            if (prevLink.HasValue)
+            {
+                Assert.EndsWith($"{routePrefix}&page[size]=5&page[number]={prevLink}", links.Prev);
+            }
+            else
+            {
+                Assert.Null(links.Prev);
+            }
+
+            if (nextLink.HasValue)
+            {
+                Assert.EndsWith($"{routePrefix}&page[size]=5&page[number]={nextLink}", links.Next);
+            }
+            else
+            {
+                Assert.Null(links.Next);
+            }
+
+            if (lastLink.HasValue)
+            {
+                Assert.EndsWith($"{routePrefix}&page[size]=5&page[number]={lastLink}", links.Last);
+            }
+            else
+            {
+                Assert.Null(links.Last);
+            }
         }
 
-        [Fact]
-        public async Task Can_Paginate_TodoItems_From_End()
-        {
-            // Arrange
-            const int expectedEntitiesPerPage = 2;
-            var totalCount = expectedEntitiesPerPage * 2;
-            var person = new Person();
-            var todoItems = _todoItemFaker.Generate(totalCount).ToList();
-
-            foreach (var todoItem in todoItems)
-                todoItem.Owner = person;
-
-            Context.TodoItems.RemoveRange(Context.TodoItems);
-            Context.TodoItems.AddRange(todoItems);
-            Context.SaveChanges();
-
-            var route = $"/api/v1/todo-items?page[size]={expectedEntitiesPerPage}&page[number]=-1";
-
-            // Act
-            var response = await Client.GetAsync(route);
-
-            // Assert
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-            var body = await response.Content.ReadAsStringAsync();
-            var deserializedBody = GetService<IJsonApiDeSerializer>().DeserializeList<TodoItem>(body);
-
-            var expectedTodoItems = new[] { todoItems[totalCount - 2], todoItems[totalCount - 1] };
-            Assert.Equal(expectedTodoItems, deserializedBody, new IdComparer<TodoItem>());
-        }
-
-        private class IdComparer<T> : IEqualityComparer<T>
+        private sealed class IdComparer<T> : IEqualityComparer<T>
             where T : IIdentifiable
         {
             public bool Equals(T x, T y) => x?.StringId == y?.StringId;
 
-            public int GetHashCode(T obj) => obj?.StringId?.GetHashCode() ?? 0;
+            public int GetHashCode(T obj) => obj.StringId?.GetHashCode() ?? 0;
         }
     }
 }

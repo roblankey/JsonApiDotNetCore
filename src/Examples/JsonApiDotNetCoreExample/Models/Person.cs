@@ -1,49 +1,76 @@
-using System;
 using System.Collections.Generic;
+using System.Linq;
 using JsonApiDotNetCore.Models;
-using JsonApiDotNetCore.Services;
+using JsonApiDotNetCore.Models.Links;
 
 namespace JsonApiDotNetCoreExample.Models
 {
-    public class PersonRole : Identifiable
+    public sealed class PersonRole : Identifiable
     {
-        [HasOne("person")]
+        [HasOne]
         public Person Person { get; set; }
     }
 
-    public class Person : Identifiable, IHasMeta
+    public sealed class Person : Identifiable, IIsLockable
     {
-        [Attr("first-name")]
-        public string FirstName { get; set; }
+        private string _firstName;
 
-        [Attr("last-name")]
+        public bool IsLocked { get; set; }
+
+        [Attr]
+        public string FirstName
+        {
+            get => _firstName;
+            set
+            {
+                if (value != _firstName)
+                {
+                    _firstName = value;
+                    Initials = string.Concat(value.Split(' ').Select(x => char.ToUpperInvariant(x[0])));
+                }
+            }
+        }
+
+        [Attr]
+        public string Initials { get; set; }
+
+        [Attr]
         public string LastName { get; set; }
 
-        [Attr("age")]
+        [Attr("the-Age")]
         public int Age { get; set; }
 
-        [HasMany("todo-items")]
-        public virtual List<TodoItem> TodoItems { get; set; }
+        [Attr]
+        public Gender Gender { get; set; }
 
-        [HasMany("assigned-todo-items")]
-        public virtual List<TodoItem> AssignedTodoItems { get; set; }
+        [Attr]
+        public string Category { get; set; }
 
-        [HasMany("todo-collections")]
-        public virtual List<TodoItemCollection> TodoItemCollections { get; set; }
+        [HasMany]
+        public ISet<TodoItem> TodoItems { get; set; }
 
-        [HasOne("role")]
-        public virtual PersonRole Role { get; set; }
+        [HasMany]
+        public ISet<TodoItem> AssignedTodoItems { get; set; }
+
+        [HasMany]
+        public HashSet<TodoItemCollection> todoCollections { get; set; }
+
+        [HasOne]
+        public PersonRole Role { get; set; }
         public int? PersonRoleId { get; set; }
 
-        [HasOne("unincludeable-item", documentLinks: Link.All, canInclude: false)]
-        public virtual TodoItem UnIncludeableItem { get; set; }
+        [HasOne]
+        public TodoItem OneToOneTodoItem { get; set; }
 
-        public Dictionary<string, object> GetMeta(IJsonApiContext context)
-        {
-            return new Dictionary<string, object> {
-                { "copyright", "Copyright 2015 Example Corp." },
-                { "authors", new string[] { "Jared Nance" } }
-            };
-        }
+        [HasOne]
+        public TodoItem StakeHolderTodoItem { get; set; }
+        public int? StakeHolderTodoItemId { get; set; }
+
+        [HasOne(links: Link.All, canInclude: false)]
+        public TodoItem UnIncludeableItem { get; set; }
+
+        [HasOne]
+        public Passport Passport { get; set; }
+        public int? PassportId { get; set; }
     }
 }

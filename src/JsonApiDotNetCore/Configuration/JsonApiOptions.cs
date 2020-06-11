@@ -1,11 +1,6 @@
-using System;
-using System.Collections.Generic;
-using JsonApiDotNetCore.Builders;
 using JsonApiDotNetCore.Graph;
-using JsonApiDotNetCore.Internal;
 using JsonApiDotNetCore.Models;
-using JsonApiDotNetCore.Serialization;
-using Microsoft.EntityFrameworkCore;
+using JsonApiDotNetCore.Models.Links;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
@@ -14,27 +9,41 @@ namespace JsonApiDotNetCore.Configuration
     /// <summary>
     /// Global options
     /// </summary>
-    public class JsonApiOptions
+    public class JsonApiOptions : IJsonApiOptions
     {
-        /// <summary>
-        /// Provides an interface for formatting resource names by convention
-        /// </summary>
-        public static IResourceNameFormatter ResourceNameFormatter { get; set; } = new DefaultResourceNameFormatter();
+        /// <inheritdoc/>
+        public bool RelativeLinks { get; set; } = false;
+
+        /// <inheritdoc/>
+        public Link TopLevelLinks { get; set; } = Link.All;
+
+        /// <inheritdoc/>
+        public Link ResourceLinks { get; set; } = Link.All;
+
+        /// <inheritdoc/>
+        public Link RelationshipLinks { get; set; } = Link.All;
 
         /// <summary>
         /// Provides an interface for formatting relationship id properties given the navigation property name
         /// </summary>
         public static IRelatedIdMapper RelatedIdMapper { get; set; } = new DefaultRelatedIdMapper();
 
+        /// <inheritdoc/>
+        public bool IncludeExceptionStackTraceInErrors { get; set; } = false;
+
         /// <summary>
-        /// Whether or not stack traces should be serialized in Error objects
+        /// Whether or not resource hooks are enabled.
+        /// This is currently an experimental feature and defaults to <see langword="false"/>.
         /// </summary>
-        public static bool DisableErrorStackTraces { get; set; }
-        
+        public bool EnableResourceHooks { get; set; } = false;
+
         /// <summary>
-        /// Whether or not source URLs should be serialized in Error objects
+        /// Whether or not database values should be included by default
+        /// for resource hooks. Ignored if EnableResourceHooks is set false.
+        ///
+        /// Defaults to <see langword="false"/>.
         /// </summary>
-        public static bool DisableErrorSource { get; set; }
+        public bool LoadDatabaseValues { get; set; }
 
         /// <summary>
         /// The base URL Namespace
@@ -44,13 +53,38 @@ namespace JsonApiDotNetCore.Configuration
         /// </example>
         public string Namespace { get; set; }
 
+        /// <inheritdoc/>
+        public bool AllowQueryStringOverrideForSerializerNullValueHandling { get; set; }
+
+        /// <inheritdoc/>
+        public bool AllowQueryStringOverrideForSerializerDefaultValueHandling { get; set; }
+
+        /// <inheritdoc/>
+        public AttrCapabilities DefaultAttrCapabilities { get; set; } = AttrCapabilities.All;
+
         /// <summary>
-        /// The default page size for all resources
+        /// The default page size for all resources. The value zero means: no paging.
         /// </summary>
         /// <example>
         /// <code>options.DefaultPageSize = 10;</code>
         /// </example>
-        public int DefaultPageSize { get; set; }
+        public int DefaultPageSize { get; set; } = 10;
+
+        /// <summary>
+        /// Optional. When set, limits the maximum page size for all resources.
+        /// </summary>
+        /// <example>
+        /// <code>options.MaximumPageSize = 50;</code>
+        /// </example>
+        public int? MaximumPageSize { get; set; }
+
+        /// <summary>
+        /// Optional. When set, limits the maximum page number for all resources.
+        /// </summary>
+        /// <example>
+        /// <code>options.MaximumPageNumber = 100;</code>
+        /// </example>
+        public int? MaximumPageNumber { get; set; }
 
         /// <summary>
         /// Whether or not the total-record count should be included in all document
@@ -64,8 +98,8 @@ namespace JsonApiDotNetCore.Configuration
 
         /// <summary>
         /// Whether or not clients can provide ids when creating resources.
-        /// Defaults to false.  When disabled the application will respond 
-        /// with a 403 Forbidden respponse if a client attempts to create a 
+        /// Defaults to false.  When disabled the application will respond
+        /// with a 403 Forbidden response if a client attempts to create a
         /// resource with a defined id.
         /// </summary>
         /// <example>
@@ -74,66 +108,14 @@ namespace JsonApiDotNetCore.Configuration
         public bool AllowClientGeneratedIds { get; set; }
 
         /// <summary>
-        /// The graph of all resources exposed by this application.
-        /// </summary>
-        public IResourceGraph ResourceGraph { get; set; }
-
-        /// <summary>
-        /// Use relative links for all resources.
+        /// Whether or not to allow all custom query string parameters.
         /// </summary>
         /// <example>
         /// <code>
-        /// options.RelativeLinks = true;
-        /// </code>
-        /// <code>
-        /// {
-        ///   "type": "articles",
-        ///   "id": "4309",
-        ///   "relationships": {
-        ///      "author": {
-        ///        "links": {
-        ///          "self": "/api/v1/articles/4309/relationships/author",
-        ///          "related": "/api/v1/articles/4309/author"
-        ///        }
-        ///      }
-        ///   }
-        /// }
+        /// options.AllowCustomQueryStringParameters = true;
         /// </code>
         /// </example>
-        public bool RelativeLinks { get; set; }
-
-        /// <summary>
-        /// Whether or not to allow all custom query parameters.
-        /// </summary>
-        /// <example>
-        /// <code>
-        /// options.AllowCustomQueryParameters = true;
-        /// </code>
-        /// </example>
-        public bool AllowCustomQueryParameters { get; set; }
-
-        /// <summary>
-        /// The default behavior for serializing null attributes.
-        /// </summary>
-        /// <example>
-        /// <code>
-        /// options.NullAttributeResponseBehavior = new NullAttributeResponseBehavior {
-        ///  // ...
-        ///};
-        /// </code>
-        /// </example>
-        public NullAttributeResponseBehavior NullAttributeResponseBehavior { get; set; }
-
-        /// <summary>
-        /// Whether or not to allow json:api v1.1 operation requests.
-        /// This is a beta feature and there may be breaking changes
-        /// in subsequent releases. For now, it should be considered
-        /// experimental.
-        /// </summary>
-        /// <remarks>
-        /// This will be enabled by default in a subsequent patch JsonApiDotNetCore v2.2.x
-        /// </remarks>
-        public bool EnableOperations { get; set; }
+        public bool AllowCustomQueryStringParameters { get; set; }
 
         /// <summary>
         /// Whether or not to validate model state.
@@ -145,40 +127,13 @@ namespace JsonApiDotNetCore.Configuration
         /// </example>
         public bool ValidateModelState { get; set; }
 
-        [Obsolete("JsonContract resolver can now be set on SerializerSettings.")]
-        public IContractResolver JsonContractResolver
+        /// <inheritdoc/>
+        public JsonSerializerSettings SerializerSettings { get; } = new JsonSerializerSettings
         {
-            get => SerializerSettings.ContractResolver;
-            set => SerializerSettings.ContractResolver = value;
-        }
-        public JsonSerializerSettings SerializerSettings { get; } = new JsonSerializerSettings()
-        {
-            NullValueHandling = NullValueHandling.Ignore,
-            ContractResolver = new DasherizedResolver()
+            ContractResolver = new DefaultContractResolver
+            {
+                NamingStrategy = new CamelCaseNamingStrategy()
+            }
         };
-
-        public void BuildResourceGraph<TContext>(Action<IResourceGraphBuilder> builder) where TContext : DbContext
-        {
-            BuildResourceGraph(builder);
-
-            ResourceGraphBuilder.AddDbContext<TContext>();
-
-            ResourceGraph = ResourceGraphBuilder.Build();
-        }
-
-        public void BuildResourceGraph(Action<IResourceGraphBuilder> builder)
-        {
-            if (builder == null) return;
-
-            builder(ResourceGraphBuilder);
-
-            ResourceGraph = ResourceGraphBuilder.Build();
-        }
-
-        public void EnableExtension(JsonApiExtension extension)
-            => EnabledExtensions.Add(extension);
-
-        internal IResourceGraphBuilder ResourceGraphBuilder { get; } = new ResourceGraphBuilder();
-        internal List<JsonApiExtension> EnabledExtensions { get; set; } = new List<JsonApiExtension>();
     }
 }

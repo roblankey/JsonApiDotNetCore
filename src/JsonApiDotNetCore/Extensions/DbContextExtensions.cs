@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using JsonApiDotNetCore.Models;
 using Microsoft.EntityFrameworkCore;
@@ -10,36 +11,23 @@ namespace JsonApiDotNetCore.Extensions
 {
     public static class DbContextExtensions
     {
-        [Obsolete("This is no longer required since the introduction of context.Set<T>", error: false)]
-        public static DbSet<T> GetDbSet<T>(this DbContext context) where T : class 
-            => context.Set<T>();
-
-        /// <summary>
-        /// Get the DbSet when the model type is unknown until runtime
-        /// </summary>
-        public static IQueryable<object> Set(this DbContext context, Type t)
-            => (IQueryable<object>)context
-                .GetType()
-                .GetMethod("Set")
-                .MakeGenericMethod(t) // TODO: will caching help runtime performance?
-                .Invoke(context, null);
-
         /// <summary>
         /// Determines whether or not EF is already tracking an entity of the same Type and Id
+        /// and returns that entity.
         /// </summary>
-        public static bool EntityIsTracked(this DbContext context, IIdentifiable entity)
+        internal static IIdentifiable GetTrackedEntity(this DbContext context, IIdentifiable entity)
         {
             if (entity == null)
                 throw new ArgumentNullException(nameof(entity));
-            
+
             var trackedEntries = context.ChangeTracker
                 .Entries()
-                .FirstOrDefault(entry => 
-                    entry.Entity.GetType() == entity.GetType() 
+                .FirstOrDefault(entry =>
+                    entry.Entity.GetType() == entity.GetType()
                     && ((IIdentifiable)entry.Entity).StringId == entity.StringId
                 );
 
-            return trackedEntries != null;
+            return (IIdentifiable)trackedEntries?.Entity;
         }
 
         /// <summary>
@@ -67,7 +55,7 @@ namespace JsonApiDotNetCore.Extensions
     /// If a transaction already exists, commit, rollback and dispose
     /// will not be called. It is assumed the creator of the original
     /// transaction should be responsible for disposal.
-    /// <summary>
+    /// </summary>
     internal struct SafeTransactionProxy : IDbContextTransaction
     {
         private readonly bool _shouldExecute;
@@ -100,6 +88,21 @@ namespace JsonApiDotNetCore.Extensions
         {
             if(_shouldExecute) 
                 func(_transaction);
+        }
+
+        public Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            return _transaction.CommitAsync(cancellationToken);
+        }
+
+        public Task RollbackAsync(CancellationToken cancellationToken = default)
+        {
+            return _transaction.RollbackAsync(cancellationToken);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return _transaction.DisposeAsync();
         }
     }
 }

@@ -1,15 +1,18 @@
 using GettingStarted.Models;
+using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Controllers;
 using JsonApiDotNetCore.Services;
+using Microsoft.Extensions.Logging;
 
-namespace GettingStarted
+namespace GettingStarted.Controllers
 {
-    public class ArticlesController : JsonApiController<Article>
+    public sealed class ArticlesController : JsonApiController<Article>
     {
         public ArticlesController(
-          IJsonApiContext jsonApiContext,
-          IResourceService<Article> resourceService)
-          : base(jsonApiContext, resourceService)
+            IJsonApiOptions jsonApiOptions,
+            ILoggerFactory loggerFactory,
+            IResourceService<Article> resourceService)
+            : base(jsonApiOptions, loggerFactory, resourceService)
         { }
     }
 }

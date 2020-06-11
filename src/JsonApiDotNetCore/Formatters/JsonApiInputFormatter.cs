@@ -1,21 +1,19 @@
 using System;
 using System.Threading.Tasks;
-using JsonApiDotNetCore.Internal;
+using JsonApiDotNetCore.Extensions;
 using Microsoft.AspNetCore.Mvc.Formatters;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace JsonApiDotNetCore.Formatters
 {
-    public class JsonApiInputFormatter : IInputFormatter
+    public sealed class JsonApiInputFormatter : IInputFormatter
     {
         public bool CanRead(InputFormatterContext context)
         {
             if (context == null)
                 throw new ArgumentNullException(nameof(context));
 
-            var contentTypeString = context.HttpContext.Request.ContentType;
-
-            return contentTypeString == Constants.ContentType;
+            return context.HttpContext.IsJsonApiRequest();
         }
 
         public async Task<InputFormatterResult> ReadAsync(InputFormatterContext context)

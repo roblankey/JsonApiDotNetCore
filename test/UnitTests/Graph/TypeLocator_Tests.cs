@@ -1,17 +1,16 @@
 using System;
-using System.Reflection;
 using JsonApiDotNetCore.Graph;
 using JsonApiDotNetCore.Models;
 using Xunit;
 
 namespace UnitTests.Internal
 {
-    public class TypeLocator_Tests
+    public sealed class TypeLocator_Tests
     {
         [Fact]
         public void GetGenericInterfaceImplementation_Gets_Implementation()
         {
-            // arrange
+            // Arrange
             var assembly = GetType().Assembly;
             var openGeneric = typeof(IGenericInterface<>);
             var genericArg = typeof(int);
@@ -19,37 +18,36 @@ namespace UnitTests.Internal
             var expectedImplementation = typeof(Implementation);
             var expectedInterface = typeof(IGenericInterface<int>);
 
-            // act
-            var result = TypeLocator.GetGenericInterfaceImplementation(
+            // Act
+            var (implementation, registrationInterface) = TypeLocator.GetGenericInterfaceImplementation(
                 assembly,
                 openGeneric,
                 genericArg
             );
 
-            // assert
-            Assert.NotNull(result);
-            Assert.Equal(expectedImplementation, result.implementation);
-            Assert.Equal(expectedInterface, result.registrationInterface);
+            // Assert
+            Assert.Equal(expectedImplementation, implementation);
+            Assert.Equal(expectedInterface, registrationInterface);
         }
 
         [Fact]
         public void GetDerivedGenericTypes_Gets_Implementation()
         {
-            // arrange
+            // Arrange
             var assembly = GetType().Assembly;
             var openGeneric = typeof(BaseType<>);
             var genericArg = typeof(int);
 
             var expectedImplementation = typeof(DerivedType);
 
-            // act
+            // Act
             var results = TypeLocator.GetDerivedGenericTypes(
                 assembly,
                 openGeneric,
                 genericArg
             );
 
-            // assert
+            // Assert
             Assert.NotNull(results);
             var result = Assert.Single(results);
             Assert.Equal(expectedImplementation, result);
@@ -58,98 +56,67 @@ namespace UnitTests.Internal
         [Fact]
         public void GetIdType_Correctly_Identifies_JsonApiResource()
         {
-            // arrange
+            // Arrange
             var type = typeof(Model);
-            var exextedIdType = typeof(int);
+            var expectedIdType = typeof(int);
 
-            // act
-            var result = TypeLocator.GetIdType(type);
+            // Act
+            var idType = TypeLocator.GetIdType(type);
 
-            // assert
-            Assert.NotNull(result);
-            Assert.True(result.isJsonApiResource);
-            Assert.Equal(exextedIdType, result.idType);
+            // Assert
+            Assert.Equal(expectedIdType, idType);
         }
 
         [Fact]
         public void GetIdType_Correctly_Identifies_NonJsonApiResource()
         {
-            // arrange
+            // Arrange
             var type = typeof(DerivedType);
-            Type exextedIdType = null;
+            Type expectedIdType = null;
 
-            // act
-            var result = TypeLocator.GetIdType(type);
+            // Act
+            var idType = TypeLocator.GetIdType(type);
 
-            // assert
-            Assert.NotNull(result);
-            Assert.False(result.isJsonApiResource);
-            Assert.Equal(exextedIdType, result.idType);
+            // Assert
+            Assert.Equal(expectedIdType, idType);
         }
 
         [Fact]
-        public void GetIdentifableTypes_Locates_Identifiable_Resource()
+        public void TryGetResourceDescriptor_Returns_True_If_Type_Is_IIdentifiable()
         {
-            // arrange
+            // Arrange
             var resourceType = typeof(Model);
 
-            // act
-            var results = TypeLocator.GetIdentifableTypes(resourceType.Assembly);
-
-            // assert
-            Assert.Contains(results, r => r.ResourceType == resourceType);
-        }
-
-        [Fact]
-        public void GetIdentifableTypes__Only_Contains_IIdentifiable_Types()
-        {
-            // arrange
-            var resourceType = typeof(Model);
-
-            // act
-            var resourceDescriptors = TypeLocator.GetIdentifableTypes(resourceType.Assembly);
-
-            // assert
-            foreach(var resourceDescriptor in resourceDescriptors)
-                Assert.True(typeof(IIdentifiable).IsAssignableFrom(resourceDescriptor.ResourceType));
-        }
-
-        [Fact]
-        public void TryGetResourceDescriptor_Returns_True_If_Type_Is_IIdentfiable()
-        {
-            // arrange
-            var resourceType = typeof(Model);
-
-            // act
+            // Act
             var isJsonApiResource = TypeLocator.TryGetResourceDescriptor(resourceType, out var descriptor);
 
-            // assert
+            // Assert
             Assert.True(isJsonApiResource);
             Assert.Equal(resourceType, descriptor.ResourceType);
             Assert.Equal(typeof(int), descriptor.IdType);
         }
 
         [Fact]
-        public void TryGetResourceDescriptor_Returns_False_If_Type_Is_IIdentfiable()
+        public void TryGetResourceDescriptor_Returns_False_If_Type_Is_IIdentifiable()
         {
-            // arrange
+            // Arrange
             var resourceType = typeof(String);
 
-            // act
-            var isJsonApiResource = TypeLocator.TryGetResourceDescriptor(resourceType, out var descriptor);
+            // Act
+            var isJsonApiResource = TypeLocator.TryGetResourceDescriptor(resourceType, out var _);
 
-            // assert
+            // Assert
             Assert.False(isJsonApiResource);
         }
     }
 
     
     public interface IGenericInterface<T> { }
-    public class Implementation : IGenericInterface<int> { }
+    public sealed class Implementation : IGenericInterface<int> { }
 
 
     public class BaseType<T> { }
-    public class DerivedType : BaseType<int> { }
+    public sealed class DerivedType : BaseType<int> { }
 
-    public class Model : Identifiable { }
+    public sealed class Model : Identifiable { }
 }

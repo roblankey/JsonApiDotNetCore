@@ -3,11 +3,11 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
+using JsonApiDotNetCore;
 using JsonApiDotNetCore.Models;
 using JsonApiDotNetCoreExample;
 using JsonApiDotNetCoreExample.Data;
 using JsonApiDotNetCoreExample.Models;
-using JsonApiDotNetCoreExampleTests.Startups;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Newtonsoft.Json;
@@ -16,10 +16,10 @@ using Xunit;
 namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
 {
     [Collection("WebHostCollection")]
-    public class Meta
+    public sealed class Meta
     {
-        private TestFixture<TestStartup> _fixture;
-        private AppDbContext _context;
+        private readonly TestFixture<TestStartup> _fixture;
+        private readonly AppDbContext _context;
         public Meta(TestFixture<TestStartup> fixture)
         {
             _fixture = fixture;
@@ -29,7 +29,7 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
         [Fact]
         public async Task Total_Record_Count_Included()
         {
-            // arrange
+            // Arrange
             _context.TodoItems.RemoveRange(_context.TodoItems);
             _context.TodoItems.Add(new TodoItem());
             _context.SaveChanges();
@@ -38,45 +38,45 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
                 .UseStartup<MetaStartup>();
 
             var httpMethod = new HttpMethod("GET");
-            var route = $"/api/v1/todo-items";
+            var route = "/api/v1/todoItems";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
-            var documents = JsonConvert.DeserializeObject<Documents>(responseBody);
+            var documents = JsonConvert.DeserializeObject<Document>(responseBody);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(documents.Meta);
-            Assert.Equal((long)expectedCount, (long)documents.Meta["total-records"]);
+            Assert.Equal(expectedCount, (long)documents.Meta["total-records"]);
         }
 
         [Fact]
         public async Task Total_Record_Count_Included_When_None()
         {
-            // arrange
+            // Arrange
             _context.TodoItems.RemoveRange(_context.TodoItems);
             _context.SaveChanges();
             var builder = new WebHostBuilder()
                 .UseStartup<MetaStartup>();
 
             var httpMethod = new HttpMethod("GET");
-            var route = $"/api/v1/todo-items";
+            var route = "/api/v1/todoItems";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
-            var documents = JsonConvert.DeserializeObject<Documents>(responseBody);
+            var documents = JsonConvert.DeserializeObject<Document>(responseBody);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(documents.Meta);
             Assert.Equal(0, (long)documents.Meta["total-records"]);
@@ -85,14 +85,14 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
         [Fact]
         public async Task Total_Record_Count_Not_Included_In_POST_Response()
         {
-            // arrange
+            // Arrange
             _context.TodoItems.RemoveRange(_context.TodoItems);
             _context.SaveChanges();
             var builder = new WebHostBuilder()
                 .UseStartup<MetaStartup>();
 
             var httpMethod = new HttpMethod("POST");
-            var route = $"/api/v1/todo-items";
+            var route = "/api/v1/todoItems";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
@@ -101,7 +101,7 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             {
                 data = new
                 {
-                    type = "todo-items",
+                    type = "todoItems",
                     attributes = new
                     {
                         description = "New Description",
@@ -110,14 +110,14 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             };
 
             request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(HeaderConstants.MediaType);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
             var documents = JsonConvert.DeserializeObject<Document>(responseBody);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             Assert.False(documents.Meta.ContainsKey("total-records"));
         }
@@ -125,7 +125,7 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
         [Fact]
         public async Task Total_Record_Count_Not_Included_In_PATCH_Response()
         {
-            // arrange
+            // Arrange
             _context.TodoItems.RemoveRange(_context.TodoItems);
             TodoItem todoItem = new TodoItem();
             _context.TodoItems.Add(todoItem);
@@ -134,7 +134,7 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
                 .UseStartup<MetaStartup>();
 
             var httpMethod = new HttpMethod("PATCH");
-            var route = $"/api/v1/todo-items/{todoItem.Id}";
+            var route = $"/api/v1/todoItems/{todoItem.Id}";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
@@ -143,7 +143,7 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             {
                 data = new
                 {
-                    type = "todo-items",
+                    type = "todoItems",
                     id = todoItem.Id,
                     attributes = new
                     {
@@ -153,14 +153,14 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
             };
 
             request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(HeaderConstants.MediaType);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
             var documents = JsonConvert.DeserializeObject<Document>(responseBody);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.False(documents.Meta.ContainsKey("total-records"));
         }
@@ -168,24 +168,23 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
         [Fact]
         public async Task EntityThatImplements_IHasMeta_Contains_MetaData()
         {
-            // arrange
-            var person = new Person();
-            var expectedMeta = person.GetMeta(null);
+            // Arrange
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<MetaStartup>();
 
             var httpMethod = new HttpMethod("GET");
-            var route = $"/api/v1/people";
+            var route = "/api/v1/people";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
+            var expectedMeta = (_fixture.GetService<ResourceDefinition<Person>>() as IHasMeta).GetMeta();
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
-            var documents = JsonConvert.DeserializeObject<Documents>(await response.Content.ReadAsStringAsync());
+            var documents = JsonConvert.DeserializeObject<Document>(await response.Content.ReadAsStringAsync());
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.NotNull(documents.Meta);
             Assert.NotNull(expectedMeta);
@@ -193,9 +192,8 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec.DocumentTests
 
             foreach (var hash in expectedMeta)
             {
-                if (hash.Value is IList)
+                if (hash.Value is IList listValue)
                 {
-                    var listValue = (IList)hash.Value;
                     for (var i = 0; i < listValue.Count; i++)
                         Assert.Equal(listValue[i].ToString(), ((IList)documents.Meta[hash.Key])[i].ToString());
                 }

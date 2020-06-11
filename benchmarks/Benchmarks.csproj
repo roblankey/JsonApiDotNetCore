@@ -2,14 +2,14 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>$(NetCoreAppVersion)</TargetFramework>
-    <AssemblyName>Benchmarks</AssemblyName>
   </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.10.14" />
-    <PackageReference Include="moq" Version="$(MoqVersion)" />
-    <PackageReference Include="xunit" Version="$(xUnitVersion)" />
+    <ProjectReference Include="..\src\JsonApiDotNetCore\JsonApiDotNetCore.csproj" />
   </ItemGroup>
+
   <ItemGroup>
-    <ProjectReference Include="../src/JsonApiDotNetCore/JsonApiDotNetCore.csproj" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.12.0" />
+    <PackageReference Include="Moq" Version="$(MoqVersion)" />
   </ItemGroup>
 </Project>

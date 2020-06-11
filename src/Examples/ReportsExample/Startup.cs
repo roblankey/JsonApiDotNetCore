@@ -1,39 +1,25 @@
-using JsonApiDotNetCore.Extensions;
+using JsonApiDotNetCore;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace ReportsExample
 {
-    public class Startup
+    public sealed class Startup
     {
-        public readonly IConfiguration Config;
-
-        public Startup(IHostingEnvironment env)
+        // This method gets called by the runtime. Use this method to add services to the container.
+        public void ConfigureServices(IServiceCollection services)
         {
-            var builder = new ConfigurationBuilder()
-                .SetBasePath(env.ContentRootPath)
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
-                .AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true)
-                .AddEnvironmentVariables();
-
-            Config = builder.Build();
-        }
-
-        public virtual void ConfigureServices(IServiceCollection services)
-        {
-            var mvcBuilder = services.AddMvcCore();
             services.AddJsonApi(
-                opt => opt.Namespace = "api", 
-                mvcBuilder,
+                options => options.Namespace = "api",
                 discovery => discovery.AddCurrentAssembly());
         }
 
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void Configure(IApplicationBuilder app)
         {
-            app.UseMvc();
+            app.UseRouting();
+            app.UseJsonApi();
+            app.UseEndpoints(endpoints => endpoints.MapControllers());
         }
     }
 }

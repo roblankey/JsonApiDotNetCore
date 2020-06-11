@@ -3,12 +3,12 @@ using JsonApiDotNetCore.Models;
 
 namespace GettingStarted.Models
 {
-    public class Person : Identifiable
+    public sealed class Person : Identifiable
     {
-        [Attr] 
+        [Attr]
         public string Name { get; set; }
 
-        [HasMany] 
-        public List<Article> Articles { get; set; }
+        [HasMany]
+        public ICollection<Article> Articles { get; set; }
     }
 }

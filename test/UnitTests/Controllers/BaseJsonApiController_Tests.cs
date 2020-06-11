@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http;
 using JsonApiDotNetCore.Controllers;
 using JsonApiDotNetCore.Models;
 using JsonApiDotNetCore.Services;
@@ -5,348 +7,272 @@ using Moq;
 using Xunit;
 using System.Threading.Tasks;
 using JsonApiDotNetCore.Configuration;
-using JsonApiDotNetCore.Internal;
+using JsonApiDotNetCore.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace UnitTests
 {
-    public class BaseJsonApiController_Tests
+    public sealed class BaseJsonApiController_Tests
     {
-        public class Resource : Identifiable
+        public sealed class Resource : Identifiable
         {
-            [Attr("test-attribute")] public string TestAttribute { get; set; }
+            [Attr] public string TestAttribute { get; set; }
         }
-        private Mock<IJsonApiContext> _jsonApiContextMock = new Mock<IJsonApiContext>();
-        private Mock<IResourceGraph> _resourceGraphMock = new Mock<IResourceGraph>();
+
+        public sealed class ResourceController : BaseJsonApiController<Resource>
+        {
+            public ResourceController(
+                IJsonApiOptions jsonApiOptions,
+                ILoggerFactory loggerFactory,
+                IResourceService<Resource, int> resourceService)
+                : base(jsonApiOptions, loggerFactory, resourceService)
+            { }
+
+            public ResourceController(
+                IJsonApiOptions jsonApiOptions,
+                ILoggerFactory loggerFactory,
+                IGetAllService<Resource, int> getAll = null,
+                IGetByIdService<Resource, int> getById = null,
+                IGetRelationshipService<Resource, int> getRelationship = null,
+                IGetRelationshipsService<Resource, int> getRelationships = null,
+                ICreateService<Resource, int> create = null,
+                IUpdateService<Resource, int> update = null,
+                IUpdateRelationshipService<Resource, int> updateRelationships = null,
+                IDeleteService<Resource, int> delete = null)
+                : base(jsonApiOptions, loggerFactory, getAll, getById, getRelationship, getRelationships, create,
+                    update, updateRelationships, delete)
+            { }
+        }
 
         [Fact]
         public async Task GetAsync_Calls_Service()
         {
-            // arrange
+            // Arrange
             var serviceMock = new Mock<IGetAllService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, getAll: serviceMock.Object);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance, getAll: serviceMock.Object);
 
-            // act
+            // Act
             await controller.GetAsync();
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.GetAsync(), Times.Once);
-            VerifyApplyContext();
         }
 
         [Fact]
         public async Task GetAsync_Throws_405_If_No_Service()
         {
-            // arrange
-            var serviceMock = new Mock<IGetAllService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, null);
+            // Arrange
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance, null);
 
-            // act
-            var exception = await Assert.ThrowsAsync<JsonApiException>(() => controller.GetAsync());
+            // Act
+            var exception = await Assert.ThrowsAsync<RequestMethodNotAllowedException>(() => controller.GetAsync());
 
-            // assert
-            Assert.Equal(405, exception.GetStatusCode());
+            // Assert
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Error.StatusCode);
+            Assert.Equal(HttpMethod.Get, exception.Method);
         }
 
         [Fact]
         public async Task GetAsyncById_Calls_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
             var serviceMock = new Mock<IGetByIdService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, getById: serviceMock.Object);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance, getById: serviceMock.Object);
 
-            // act
+            // Act
             await controller.GetAsync(id);
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.GetAsync(id), Times.Once);
-            VerifyApplyContext();
         }
 
         [Fact]
         public async Task GetAsyncById_Throws_405_If_No_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var serviceMock = new Mock<IGetByIdService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, getById: null);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance);
 
-            // act
-            var exception = await Assert.ThrowsAsync<JsonApiException>(() => controller.GetAsync(id));
+            // Act
+            var exception = await Assert.ThrowsAsync<RequestMethodNotAllowedException>(() => controller.GetAsync(id));
 
-            // assert
-            Assert.Equal(405, exception.GetStatusCode());
+            // Assert
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Error.StatusCode);
+            Assert.Equal(HttpMethod.Get, exception.Method);
         }
 
         [Fact]
         public async Task GetRelationshipsAsync_Calls_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
             var serviceMock = new Mock<IGetRelationshipsService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, getRelationships: serviceMock.Object);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance, getRelationships: serviceMock.Object);
 
-            // act
+            // Act
             await controller.GetRelationshipsAsync(id, string.Empty);
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.GetRelationshipsAsync(id, string.Empty), Times.Once);
-            VerifyApplyContext();
         }
 
         [Fact]
         public async Task GetRelationshipsAsync_Throws_405_If_No_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var serviceMock = new Mock<IGetRelationshipsService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, getRelationships: null);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance);
 
-            // act
-            var exception = await Assert.ThrowsAsync<JsonApiException>(() => controller.GetRelationshipsAsync(id, string.Empty));
+            // Act
+            var exception = await Assert.ThrowsAsync<RequestMethodNotAllowedException>(() => controller.GetRelationshipsAsync(id, string.Empty));
 
-            // assert
-            Assert.Equal(405, exception.GetStatusCode());
+            // Assert
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Error.StatusCode);
+            Assert.Equal(HttpMethod.Get, exception.Method);
         }
 
         [Fact]
         public async Task GetRelationshipAsync_Calls_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
             var serviceMock = new Mock<IGetRelationshipService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, getRelationship: serviceMock.Object);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance, getRelationship: serviceMock.Object);
 
-            // act
+            // Act
             await controller.GetRelationshipAsync(id, string.Empty);
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.GetRelationshipAsync(id, string.Empty), Times.Once);
-            VerifyApplyContext();
         }
 
         [Fact]
         public async Task GetRelationshipAsync_Throws_405_If_No_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var serviceMock = new Mock<IGetRelationshipService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, getRelationship: null);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance);
 
-            // act
-            var exception = await Assert.ThrowsAsync<JsonApiException>(() => controller.GetRelationshipAsync(id, string.Empty));
+            // Act
+            var exception = await Assert.ThrowsAsync<RequestMethodNotAllowedException>(() => controller.GetRelationshipAsync(id, string.Empty));
 
-            // assert
-            Assert.Equal(405, exception.GetStatusCode());
+            // Assert
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Error.StatusCode);
+            Assert.Equal(HttpMethod.Get, exception.Method);
         }
 
         [Fact]
         public async Task PatchAsync_Calls_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
             var resource = new Resource();
             var serviceMock = new Mock<IUpdateService<Resource>>();
-            _jsonApiContextMock.Setup(a => a.ApplyContext<Resource>(It.IsAny<BaseJsonApiController<Resource>>())).Returns(_jsonApiContextMock.Object);
-            _jsonApiContextMock.SetupGet(a => a.Options).Returns(new JsonApiOptions());
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, update: serviceMock.Object);
 
-            // act
+            var controller = new ResourceController(new JsonApiOptions(), NullLoggerFactory.Instance, update: serviceMock.Object);
+
+            // Act
             await controller.PatchAsync(id, resource);
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.UpdateAsync(id, It.IsAny<Resource>()), Times.Once);
-            VerifyApplyContext();
-        }
-
-        [Fact]
-        public async Task PatchAsync_ModelStateInvalid_ValidateModelStateDisbled()
-        {
-            // arrange
-            const int id = 0;
-            var resource = new Resource();
-            var serviceMock = new Mock<IUpdateService<Resource>>();
-            _jsonApiContextMock.Setup(a => a.ApplyContext<Resource>(It.IsAny<BaseJsonApiController<Resource>>())).Returns(_jsonApiContextMock.Object);
-            _jsonApiContextMock.SetupGet(a => a.Options).Returns(new JsonApiOptions { ValidateModelState = false });
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, update: serviceMock.Object);
-
-            // act
-            var response = await controller.PatchAsync(id, resource);
-
-            // assert
-            serviceMock.Verify(m => m.UpdateAsync(id, It.IsAny<Resource>()), Times.Once);
-            VerifyApplyContext();
-            Assert.IsNotType<BadRequestObjectResult>(response);
-        }
-
-        [Fact]
-        public async Task PatchAsync_ModelStateInvalid_ValidateModelStateEnabled()
-        {
-            // arrange
-            const int id = 0;
-            var resource = new Resource();
-            var serviceMock = new Mock<IUpdateService<Resource>>();
-            _jsonApiContextMock.SetupGet(a => a.ResourceGraph).Returns(_resourceGraphMock.Object);
-            _resourceGraphMock.Setup(a => a.GetPublicAttributeName<Resource>("TestAttribute")).Returns("test-attribute");
-            _jsonApiContextMock.Setup(a => a.ApplyContext<Resource>(It.IsAny<BaseJsonApiController<Resource>>())).Returns(_jsonApiContextMock.Object);
-            _jsonApiContextMock.SetupGet(a => a.Options).Returns(new JsonApiOptions{ValidateModelState = true});
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, update: serviceMock.Object);
-            controller.ModelState.AddModelError("TestAttribute", "Failed Validation");
-
-            // act
-            var response = await controller.PatchAsync(id, resource);
-
-            // assert
-            serviceMock.Verify(m => m.UpdateAsync(id, It.IsAny<Resource>()), Times.Never);
-            Assert.IsType<UnprocessableEntityObjectResult>(response);
-            Assert.IsType<ErrorCollection>(((UnprocessableEntityObjectResult) response).Value);
         }
 
         [Fact]
         public async Task PatchAsync_Throws_405_If_No_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var serviceMock = new Mock<IUpdateService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, update: null);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance);
 
-            // act
-            var exception = await Assert.ThrowsAsync<JsonApiException>(() => controller.PatchAsync(id, It.IsAny<Resource>()));
+            // Act
+            var exception = await Assert.ThrowsAsync<RequestMethodNotAllowedException>(() => controller.PatchAsync(id, It.IsAny<Resource>()));
 
-            // assert
-            Assert.Equal(405, exception.GetStatusCode());
+            // Assert
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Error.StatusCode);
+            Assert.Equal(HttpMethod.Patch, exception.Method);
         }
 
         [Fact]
         public async Task PostAsync_Calls_Service()
         {
-            // arrange
+            // Arrange
             var resource = new Resource();
             var serviceMock = new Mock<ICreateService<Resource>>();
-            _jsonApiContextMock.Setup(a => a.ApplyContext<Resource>(It.IsAny<BaseJsonApiController<Resource>>())).Returns(_jsonApiContextMock.Object);
-            _jsonApiContextMock.SetupGet(a => a.Options).Returns(new JsonApiOptions());
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, create: serviceMock.Object);
-            serviceMock.Setup(m => m.CreateAsync(It.IsAny<Resource>())).ReturnsAsync(resource);
-            controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext {HttpContext = new DefaultHttpContext()};
 
-            // act
+            var controller = new ResourceController(new JsonApiOptions(), NullLoggerFactory.Instance, create: serviceMock.Object);
+            serviceMock.Setup(m => m.CreateAsync(It.IsAny<Resource>())).ReturnsAsync(resource);
+            controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+
+            // Act
             await controller.PostAsync(resource);
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.CreateAsync(It.IsAny<Resource>()), Times.Once);
-            VerifyApplyContext();
-        }
-
-        [Fact]
-        public async Task PostAsync_ModelStateInvalid_ValidateModelStateDisabled()
-        {
-            // arrange
-            var resource = new Resource();
-            var serviceMock = new Mock<ICreateService<Resource>>();
-            _jsonApiContextMock.Setup(a => a.ApplyContext<Resource>(It.IsAny<BaseJsonApiController<Resource>>())).Returns(_jsonApiContextMock.Object);
-            _jsonApiContextMock.SetupGet(a => a.Options).Returns(new JsonApiOptions { ValidateModelState = false });
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, create: serviceMock.Object);
-            serviceMock.Setup(m => m.CreateAsync(It.IsAny<Resource>())).ReturnsAsync(resource);
-            controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new DefaultHttpContext() };
-
-            // act
-            var response = await controller.PostAsync(resource);
-
-            // assert
-            serviceMock.Verify(m => m.CreateAsync(It.IsAny<Resource>()), Times.Once);
-            VerifyApplyContext();
-            Assert.IsNotType<BadRequestObjectResult>(response);
-        }
-
-        [Fact]
-        public async Task PostAsync_ModelStateInvalid_ValidateModelStateEnabled()
-        {
-            // arrange
-            var resource = new Resource();
-            var serviceMock = new Mock<ICreateService<Resource>>();
-            _jsonApiContextMock.SetupGet(a => a.ResourceGraph).Returns(_resourceGraphMock.Object);
-            _resourceGraphMock.Setup(a => a.GetPublicAttributeName<Resource>("TestAttribute")).Returns("test-attribute");
-            _jsonApiContextMock.Setup(a => a.ApplyContext<Resource>(It.IsAny<BaseJsonApiController<Resource>>())).Returns(_jsonApiContextMock.Object);
-            _jsonApiContextMock.SetupGet(a => a.Options).Returns(new JsonApiOptions { ValidateModelState = true });
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, create: serviceMock.Object);
-            controller.ModelState.AddModelError("TestAttribute", "Failed Validation");
-
-            // act
-            var response = await controller.PostAsync(resource);
-
-            // assert
-            serviceMock.Verify(m => m.CreateAsync(It.IsAny<Resource>()), Times.Never);
-            Assert.IsType<UnprocessableEntityObjectResult>(response);
-            Assert.IsType<ErrorCollection>(((UnprocessableEntityObjectResult)response).Value);
         }
 
         [Fact]
         public async Task PatchRelationshipsAsync_Calls_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var resource = new Resource();
             var serviceMock = new Mock<IUpdateRelationshipService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, updateRelationships: serviceMock.Object);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance, updateRelationships: serviceMock.Object);
 
-            // act
+            // Act
             await controller.PatchRelationshipsAsync(id, string.Empty, null);
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.UpdateRelationshipsAsync(id, string.Empty, null), Times.Once);
-            VerifyApplyContext();
         }
 
         [Fact]
         public async Task PatchRelationshipsAsync_Throws_405_If_No_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var serviceMock = new Mock<IUpdateRelationshipService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, updateRelationships: null);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance);
 
-            // act
-            var exception = await Assert.ThrowsAsync<JsonApiException>(() => controller.PatchRelationshipsAsync(id, string.Empty, null));
+            // Act
+            var exception = await Assert.ThrowsAsync<RequestMethodNotAllowedException>(() => controller.PatchRelationshipsAsync(id, string.Empty, null));
 
-            // assert
-            Assert.Equal(405, exception.GetStatusCode());
+            // Assert
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Error.StatusCode);
+            Assert.Equal(HttpMethod.Patch, exception.Method);
         }
 
         [Fact]
         public async Task DeleteAsync_Calls_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var resource = new Resource();
             var serviceMock = new Mock<IDeleteService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, delete: serviceMock.Object);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance, delete: serviceMock.Object);
 
-            // act
+            // Act
             await controller.DeleteAsync(id);
 
-            // assert
+            // Assert
             serviceMock.Verify(m => m.DeleteAsync(id), Times.Once);
-            VerifyApplyContext();
         }
 
         [Fact]
         public async Task DeleteAsync_Throws_405_If_No_Service()
         {
-            // arrange
+            // Arrange
             const int id = 0;
-            var serviceMock = new Mock<IUpdateRelationshipService<Resource>>();
-            var controller = new BaseJsonApiController<Resource>(_jsonApiContextMock.Object, delete: null);
+            var controller = new ResourceController(new Mock<IJsonApiOptions>().Object, NullLoggerFactory.Instance);
 
-            // act
-            var exception = await Assert.ThrowsAsync<JsonApiException>(() => controller.DeleteAsync(id));
+            // Act
+            var exception = await Assert.ThrowsAsync<RequestMethodNotAllowedException>(() => controller.DeleteAsync(id));
 
-            // assert
-            Assert.Equal(405, exception.GetStatusCode());
+            // Assert
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Error.StatusCode);
+            Assert.Equal(HttpMethod.Delete, exception.Method);
         }
-
-        private void VerifyApplyContext()
-         => _jsonApiContextMock.Verify(m => m.ApplyContext<Resource>(It.IsAny<BaseJsonApiController<Resource>>()), Times.Once);
     }
 }

@@ -1,16 +1,19 @@
-using JsonApiDotNetCore.Internal;
+using JsonApiDotNetCore.Internal.Contracts;
 using JsonApiDotNetCore.Internal.Query;
+using JsonApiDotNetCore.Hooks;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Reflection;
 
 namespace JsonApiDotNetCore.Models
 {
     public interface IResourceDefinition
     {
-        List<AttrAttribute> GetOutputAttrs(object instance);
+        List<AttrAttribute> GetAllowedAttributes();
+        List<RelationshipAttribute> GetAllowedRelationships();
+        object GetCustomQueryFilter(string key);
+        List<(AttrAttribute Attribute, SortDirection SortDirection)> DefaultSort();
     }
 
     /// <summary>
@@ -19,105 +22,33 @@ namespace JsonApiDotNetCore.Models
     /// The goal of this class is to reduce the frequency with which developers have to override the
     /// service and repository layers.
     /// </summary>
-    /// <typeparam name="T">The resource type</typeparam>
-    public class ResourceDefinition<T> : IResourceDefinition where T : class, IIdentifiable
+    /// <typeparam name="TResource">The resource type</typeparam>
+    public class ResourceDefinition<TResource> : IResourceDefinition, IResourceHookContainer<TResource> where TResource : class, IIdentifiable
     {
-        private readonly IResourceGraph _graph;
-        private readonly ContextEntity _contextEntity;
-        internal readonly bool _instanceAttrsAreSpecified;
-
-        private bool _requestCachedAttrsHaveBeenLoaded = false;
-        private List<AttrAttribute> _requestCachedAttrs;
-
-        public ResourceDefinition()
+        private readonly IResourceGraph _resourceGraph;
+        private List<AttrAttribute> _allowedAttributes;
+        private List<RelationshipAttribute> _allowedRelationships;
+        public ResourceDefinition(IResourceGraph resourceGraph)
         {
-            _graph = ResourceGraph.Instance;
-            _contextEntity = ResourceGraph.Instance.GetContextEntity(typeof(T));
-            _instanceAttrsAreSpecified = InstanceOutputAttrsAreSpecified();
+            var resourceContext = resourceGraph.GetResourceContext(typeof(TResource));
+            _allowedAttributes = resourceContext.Attributes;
+            _allowedRelationships = resourceContext.Relationships;
+            _resourceGraph = resourceGraph;
         }
 
-        private bool InstanceOutputAttrsAreSpecified()
-        {
-            var derivedType = GetType();
-            var methods = derivedType.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance);
-            var instanceMethod = methods
-                .Where(m =>
-                   m.Name == nameof(OutputAttrs)
-                   && m.GetParameters()
-                        .FirstOrDefault()
-                        ?.ParameterType == typeof(T))
-                .FirstOrDefault();
-            var declaringType = instanceMethod?.DeclaringType;
-            return declaringType == derivedType;
-        }   
-
-        // TODO: need to investigate options for caching these
-        protected List<AttrAttribute> Remove(Expression<Func<T, dynamic>> filter, List<AttrAttribute> from = null)
-        {
-            from = from ?? _contextEntity.Attributes;
-
-            // model => model.Attribute
-            if (filter.Body is MemberExpression memberExpression)
-                return _contextEntity.Attributes
-                        .Where(a => a.InternalAttributeName != memberExpression.Member.Name)
-                        .ToList();
-
-            // model => new { model.Attribute1, model.Attribute2 }
-            if (filter.Body is NewExpression newExpression)
-            {
-                var attributes = new List<AttrAttribute>();
-                foreach (var attr in _contextEntity.Attributes)
-                    if (newExpression.Members.Any(m => m.Name == attr.InternalAttributeName) == false)
-                        attributes.Add(attr);
-
-                return attributes;
-            }
-
-            throw new JsonApiException(500,
-                message: $"The expression returned by '{filter}' for '{GetType()}' is of type {filter.Body.GetType()}"
-                        + " and cannot be used to select resource attributes. ",
-                detail: "The type must be a NewExpression. Example: article => new { article.Author }; ");
-        }
+        public List<RelationshipAttribute> GetAllowedRelationships() => _allowedRelationships;
+        public List<AttrAttribute> GetAllowedAttributes() => _allowedAttributes;
 
         /// <summary>
-        /// Allows POST / PATCH requests to set the value of an
-        /// attribute, but exclude the attribute in the response
-        /// this might be used if the incoming value gets hashed or
-        /// encrypted prior to being persisted and this value should
-        /// never be sent back to the client.
-        ///
-        /// Called once per filtered resource in request.
+        /// Hides specified attributes and relationships from the serialized output. Can be called directly in a resource definition implementation or
+        /// in any resource hook to combine it with eg authorization.
         /// </summary>
-        protected virtual List<AttrAttribute> OutputAttrs() => _contextEntity.Attributes;
-
-        /// <summary>
-        /// Allows POST / PATCH requests to set the value of an
-        /// attribute, but exclude the attribute in the response
-        /// this might be used if the incoming value gets hashed or
-        /// encrypted prior to being persisted and this value should
-        /// never be sent back to the client.
-        ///
-        /// Called for every instance of a resource.
-        /// </summary>
-        protected virtual List<AttrAttribute> OutputAttrs(T instance) => _contextEntity.Attributes;
-
-        public List<AttrAttribute> GetOutputAttrs(object instance)
-            => _instanceAttrsAreSpecified == false
-                ? GetOutputAttrs()
-                : OutputAttrs(instance as T);
-
-        private List<AttrAttribute> GetOutputAttrs()
+        /// <param name="selector">Should be of the form: (TResource e) => new { e.Attribute1, e.Attribute2, e.Relationship1, e.Relationship2 }</param>
+        public void HideFields(Expression<Func<TResource, dynamic>> selector)
         {
-            if (_requestCachedAttrsHaveBeenLoaded == false)
-            {
-                _requestCachedAttrs = OutputAttrs();
-                // the reason we don't just check for null is because we
-                // guarantee that OutputAttrs will be called once per
-                // request and null is a valid return value
-                _requestCachedAttrsHaveBeenLoaded = true;
-            }
-
-            return _requestCachedAttrs;
+            var fieldsToHide = _resourceGraph.GetFields(selector);
+            _allowedAttributes = _allowedAttributes.Except(fieldsToHide.Where(f => f is AttrAttribute)).Cast<AttrAttribute>().ToList();
+            _allowedRelationships = _allowedRelationships.Except(fieldsToHide.Where(f => f is RelationshipAttribute)).Cast<RelationshipAttribute>().ToList();
         }
 
         /// <summary>
@@ -157,44 +88,73 @@ namespace JsonApiDotNetCore.Models
         /// </example>
         public virtual QueryFilters GetQueryFilters() => null;
 
+        public object GetCustomQueryFilter(string key)
+        {
+            var customFilters = GetQueryFilters();
+            if (customFilters != null && customFilters.TryGetValue(key, out var query))
+                return query;
+            return null;
+        }
+
+        /// <inheritdoc/>
+        public virtual void AfterCreate(HashSet<TResource> entities, ResourcePipeline pipeline) { }
+        /// <inheritdoc/>
+        public virtual void AfterRead(HashSet<TResource> entities, ResourcePipeline pipeline, bool isIncluded = false) { }
+        /// <inheritdoc/>
+        public virtual void AfterUpdate(HashSet<TResource> entities, ResourcePipeline pipeline) { }
+        /// <inheritdoc/>
+        public virtual void AfterDelete(HashSet<TResource> entities, ResourcePipeline pipeline, bool succeeded) { }
+        /// <inheritdoc/>
+        public virtual void AfterUpdateRelationship(IRelationshipsDictionary<TResource> entitiesByRelationship, ResourcePipeline pipeline) { }
+        /// <inheritdoc/>
+        public virtual IEnumerable<TResource> BeforeCreate(IEntityHashSet<TResource> entities, ResourcePipeline pipeline) { return entities; }
+        /// <inheritdoc/>
+        public virtual void BeforeRead(ResourcePipeline pipeline, bool isIncluded = false, string stringId = null) { }
+        /// <inheritdoc/>
+        public virtual IEnumerable<TResource> BeforeUpdate(IDiffableEntityHashSet<TResource> entities, ResourcePipeline pipeline) { return entities; }
+        /// <inheritdoc/>
+        public virtual IEnumerable<TResource> BeforeDelete(IEntityHashSet<TResource> entities, ResourcePipeline pipeline) { return entities; }
+        /// <inheritdoc/>
+        public virtual IEnumerable<string> BeforeUpdateRelationship(HashSet<string> ids, IRelationshipsDictionary<TResource> entitiesByRelationship, ResourcePipeline pipeline) { return ids; }
+        /// <inheritdoc/>
+        public virtual void BeforeImplicitUpdateRelationship(IRelationshipsDictionary<TResource> entitiesByRelationship, ResourcePipeline pipeline) { }
+        /// <inheritdoc/>
+        public virtual IEnumerable<TResource> OnReturn(HashSet<TResource> entities, ResourcePipeline pipeline) { return entities; }
+
+
         /// <summary>
         /// This is an alias type intended to simplify the implementation's
         /// method signature.
         /// See <see cref="GetQueryFilters" /> for usage details.
         /// </summary>
-        public class QueryFilters : Dictionary<string, Func<IQueryable<T>, string, IQueryable<T>>> { }
+        public sealed class QueryFilters : Dictionary<string, Func<IQueryable<TResource>, FilterQuery, IQueryable<TResource>>> { }
 
         /// <summary>
-        /// Define a the default sort order if no sort key is provided.
+        /// Define the default sort order if no sort key is provided.
         /// </summary>
         /// <returns>
         /// A list of properties and the direction they should be sorted.
         /// </returns>
         /// <example>
         /// <code>
-        /// protected override PropertySortOrder GetDefaultSortOrder()
+        /// public override PropertySortOrder GetDefaultSortOrder()
         ///     => new PropertySortOrder {
         ///         (t => t.Prop1, SortDirection.Ascending),
         ///         (t => t.Prop2, SortDirection.Descending),
         ///     };
         /// </code>
         /// </example>
-        protected virtual PropertySortOrder GetDefaultSortOrder() => null;
+        public virtual PropertySortOrder GetDefaultSortOrder() => null;
 
-        internal List<(AttrAttribute, SortDirection)> DefaultSort()
+        public List<(AttrAttribute Attribute, SortDirection SortDirection)> DefaultSort()
         {
             var defaultSortOrder = GetDefaultSortOrder();
-            if(defaultSortOrder != null && defaultSortOrder.Count > 0)
+            if (defaultSortOrder != null && defaultSortOrder.Count > 0)
             {
-                var order = new List<(AttrAttribute, SortDirection)>();
-                foreach(var sortProp in defaultSortOrder)
+                var order = new List<(AttrAttribute Attribute, SortDirection SortDirection)>();
+                foreach (var sortProp in defaultSortOrder)
                 {
-                    // TODO: error handling, log or throw?
-                    if (sortProp.Item1.Body is MemberExpression memberExpression)
-                        order.Add(
-                            (_contextEntity.Attributes.SingleOrDefault(a => a.InternalAttributeName != memberExpression.Member.Name), 
-                            sortProp.Item2)
-                        );
+                    order.Add((_resourceGraph.GetAttributes(sortProp.Attribute).Single(), sortProp.SortDirection));
                 }
 
                 return order;
@@ -208,6 +168,6 @@ namespace JsonApiDotNetCore.Models
         /// method signature.
         /// See <see cref="GetQueryFilters" /> for usage details.
         /// </summary>
-        public class PropertySortOrder : List<(Expression<Func<T, dynamic>>, SortDirection)> { }
+        public sealed class PropertySortOrder : List<(Expression<Func<TResource, dynamic>> Attribute, SortDirection SortDirection)> { }
     }
 }

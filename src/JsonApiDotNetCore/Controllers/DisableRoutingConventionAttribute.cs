@@ -2,6 +2,7 @@ using System;
 
 namespace JsonApiDotNetCore.Controllers
 {
-    public class DisableRoutingConventionAttribute : Attribute
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Interface)]
+    public sealed class DisableRoutingConventionAttribute : Attribute
     { }
 }

@@ -1,11 +1,12 @@
 using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
-using JsonApiDotNetCore.Internal;
+using JsonApiDotNetCore.Exceptions;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace JsonApiDotNetCore.Controllers
 {
-    public abstract class HttpRestrictAttribute : ActionFilterAttribute, IAsyncActionFilter
+    public abstract class HttpRestrictAttribute : ActionFilterAttribute
     {
         protected abstract string[] Methods { get; }
 
@@ -16,7 +17,9 @@ namespace JsonApiDotNetCore.Controllers
             var method = context.HttpContext.Request.Method;
 
             if (CanExecuteAction(method) == false)
-                throw new JsonApiException(405, $"This resource does not support {method} requests.");
+            {
+                throw new RequestMethodNotAllowedException(new HttpMethod(method));
+            }
 
             await next();
         }
@@ -27,22 +30,22 @@ namespace JsonApiDotNetCore.Controllers
         }
     }
 
-    public class HttpReadOnlyAttribute : HttpRestrictAttribute
+    public sealed class HttpReadOnlyAttribute : HttpRestrictAttribute
     {
         protected override string[] Methods { get; } = new string[] { "POST", "PATCH", "DELETE" };
     }
 
-    public class NoHttpPostAttribute : HttpRestrictAttribute
+    public sealed class NoHttpPostAttribute : HttpRestrictAttribute
     {
         protected override string[] Methods { get; } = new string[] { "POST" };
     }
 
-    public class NoHttpPatchAttribute : HttpRestrictAttribute
+    public sealed class NoHttpPatchAttribute : HttpRestrictAttribute
     {
         protected override string[] Methods { get; } = new string[] { "PATCH" };
     }
 
-    public class NoHttpDeleteAttribute : HttpRestrictAttribute
+    public sealed class NoHttpDeleteAttribute : HttpRestrictAttribute
     {
         protected override string[] Methods { get; } = new string[] { "DELETE" };
     }

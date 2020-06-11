@@ -1,5 +1,4 @@
 using JsonApiDotNetCore.Builders;
-using JsonApiDotNetCore.Configuration;
 using JsonApiDotNetCore.Data;
 using JsonApiDotNetCore.Internal;
 using JsonApiDotNetCore.Models;
@@ -13,13 +12,13 @@ using System.Reflection;
 
 namespace JsonApiDotNetCore.Graph
 {
-    public class ServiceDiscoveryFacade
+    public class ServiceDiscoveryFacade : IServiceDiscoveryFacade
     {
-        internal static HashSet<Type> ServiceInterfaces = new HashSet<Type> {
+        internal static readonly HashSet<Type> ServiceInterfaces = new HashSet<Type> {
             typeof(IResourceService<>),
-            typeof(IResourceService<,>),            
-            typeof(IResourceCmdService<>),
-            typeof(IResourceCmdService<,>),
+            typeof(IResourceService<,>),
+            typeof(IResourceCommandService<>),
+            typeof(IResourceCommandService<,>),
             typeof(IResourceQueryService<>),
             typeof(IResourceQueryService<,>),
             typeof(ICreateService<>),
@@ -38,78 +37,62 @@ namespace JsonApiDotNetCore.Graph
             typeof(IDeleteService<,>)
         };
 
-        internal static HashSet<Type> RepositoryInterfaces = new HashSet<Type> {
-            typeof(IEntityRepository<>),
-            typeof(IEntityRepository<,>),
-            typeof(IEntityWriteRepository<>),
-            typeof(IEntityWriteRepository<,>),
-            typeof(IEntityReadRepository<>),
-            typeof(IEntityReadRepository<,>)
+        private static readonly HashSet<Type> RepositoryInterfaces = new HashSet<Type> {
+            typeof(IResourceRepository<>),
+            typeof(IResourceRepository<,>),
+            typeof(IResourceWriteRepository<>),
+            typeof(IResourceWriteRepository<,>),
+            typeof(IResourceReadRepository<>),
+            typeof(IResourceReadRepository<,>)
         };
 
         private readonly IServiceCollection _services;
-        private readonly IResourceGraphBuilder _graphBuilder;
-        private readonly List<ResourceDescriptor> _identifiables = new List<ResourceDescriptor>();
+        private readonly IResourceGraphBuilder _resourceGraphBuilder;
+        private readonly IdentifiableTypeCache _typeCache = new IdentifiableTypeCache();
 
-        public ServiceDiscoveryFacade(
-            IServiceCollection services, 
-            IResourceGraphBuilder graphBuilder)
+        public ServiceDiscoveryFacade(IServiceCollection services, IResourceGraphBuilder resourceGraphBuilder)
         {
             _services = services;
-            _graphBuilder = graphBuilder;
+            _resourceGraphBuilder = resourceGraphBuilder;
         }
 
         /// <summary>
-        /// Add resources, services and repository implementations to the container.
+        /// Adds resource, service and repository implementations to the container.
         /// </summary>
         public ServiceDiscoveryFacade AddCurrentAssembly() => AddAssembly(Assembly.GetCallingAssembly());
 
         /// <summary>
-        /// Add resources, services and repository implementations to the container.
+        /// Adds resource, service and repository implementations defined in the specified assembly to the container.
         /// </summary>
-        /// <param name="assembly">The assembly to search for resources in.</param>
         public ServiceDiscoveryFacade AddAssembly(Assembly assembly)
         {
             AddDbContextResolvers(assembly);
 
-            var resourceDescriptors = TypeLocator.GetIdentifableTypes(assembly);
+            var resourceDescriptors = _typeCache.GetIdentifiableTypes(assembly);
             foreach (var resourceDescriptor in resourceDescriptors)
             {
                 AddResource(assembly, resourceDescriptor);
                 AddServices(assembly, resourceDescriptor);
                 AddRepositories(assembly, resourceDescriptor);
             }
-
             return this;
         }
 
         private void AddDbContextResolvers(Assembly assembly)
         {
             var dbContextTypes = TypeLocator.GetDerivedTypes(assembly, typeof(DbContext));
-            foreach(var dbContextType in dbContextTypes)
+            foreach (var dbContextType in dbContextTypes)
             {
                 var resolverType = typeof(DbContextResolver<>).MakeGenericType(dbContextType);
                 _services.AddScoped(typeof(IDbContextResolver), resolverType);
             }
         }
 
-        /// <summary>
-        /// Adds resources to the graph and registers <see cref="ResourceDefinition{T}"/> types on the container.
-        /// </summary>
-        /// <param name="assembly">The assembly to search for resources in.</param>
-        public ServiceDiscoveryFacade AddResources(Assembly assembly)
-        {
-            var identifiables = TypeLocator.GetIdentifableTypes(assembly);
-            foreach (var identifiable in identifiables)
-                AddResource(assembly, identifiable);
-
-            return this;
-        }
-
         private void AddResource(Assembly assembly, ResourceDescriptor resourceDescriptor)
         {
             RegisterResourceDefinition(assembly, resourceDescriptor);
-            AddResourceToGraph(resourceDescriptor);
+
+            _resourceGraphBuilder.AddResource(resourceDescriptor.ResourceType, resourceDescriptor.IdType);
         }
 
         private void RegisterResourceDefinition(Assembly assembly, ResourceDescriptor identifiable)
@@ -125,65 +108,38 @@ namespace JsonApiDotNetCore.Graph
             catch (InvalidOperationException e)
             {
                 throw new JsonApiSetupException($"Cannot define multiple ResourceDefinition<> implementations for '{identifiable.ResourceType}'", e);
-            }            
-        }
-
-        private void AddResourceToGraph(ResourceDescriptor identifiable)
-        {
-            var resourceName = FormatResourceName(identifiable.ResourceType);
-            _graphBuilder.AddResource(identifiable.ResourceType, identifiable.IdType, resourceName);
-        }
-
-        private string FormatResourceName(Type resourceType) 
-            => JsonApiOptions.ResourceNameFormatter.FormatResourceName(resourceType);
-
-        /// <summary>
-        /// Add <see cref="IResourceService{T, TId}"/> implementations to container.
-        /// </summary>
-        /// <param name="assembly">The assembly to search for resources in.</param>
-        public ServiceDiscoveryFacade AddServices(Assembly assembly)
-        {
-            var resourceDescriptors = TypeLocator.GetIdentifableTypes(assembly);
-            foreach (var resourceDescriptor in resourceDescriptors)
-                AddServices(assembly, resourceDescriptor);
-
-            return this;
+            }
         }
 
         private void AddServices(Assembly assembly, ResourceDescriptor resourceDescriptor)
         {
-            foreach(var serviceInterface in  ServiceInterfaces)
+            foreach (var serviceInterface in ServiceInterfaces)
+            {
                 RegisterServiceImplementations(assembly, serviceInterface, resourceDescriptor);
-        }
-
-        /// <summary>
-        /// Add <see cref="IEntityRepository{T, TId}"/> implementations to container.
-        /// </summary>
-        /// <param name="assembly">The assembly to search for resources in.</param>
-        public ServiceDiscoveryFacade AddRepositories(Assembly assembly) 
-        {
-            var resourceDescriptors = TypeLocator.GetIdentifableTypes(assembly);
-            foreach (var resourceDescriptor in resourceDescriptors)
-                AddRepositories(assembly, resourceDescriptor);
-
-            return this;
+            }
         }
 
         private void AddRepositories(Assembly assembly, ResourceDescriptor resourceDescriptor)
         {
-            foreach(var serviceInterface in  RepositoryInterfaces)
+            foreach (var serviceInterface in RepositoryInterfaces)
+            {
                 RegisterServiceImplementations(assembly, serviceInterface, resourceDescriptor);
+            }
         }
 
         private void RegisterServiceImplementations(Assembly assembly, Type interfaceType, ResourceDescriptor resourceDescriptor)
         {
-            var genericArguments = interfaceType.GetTypeInfo().GenericTypeParameters.Length == 2
-                ? new [] { resourceDescriptor.ResourceType, resourceDescriptor.IdType }
-                : new [] { resourceDescriptor.ResourceType };
-
+            if (resourceDescriptor.IdType == typeof(Guid) && interfaceType.GetTypeInfo().GenericTypeParameters.Length == 1)
+            {
+                return;
+            }
+            var genericArguments = interfaceType.GetTypeInfo().GenericTypeParameters.Length == 2 ? new[] { resourceDescriptor.ResourceType, resourceDescriptor.IdType } : new[] { resourceDescriptor.ResourceType };
             var service = TypeLocator.GetGenericInterfaceImplementation(assembly, interfaceType, genericArguments);
+
             if (service.implementation != null)
+            {
                 _services.AddScoped(service.registrationInterface, service.implementation);
+            }
         }
     }
 }

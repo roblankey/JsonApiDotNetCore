@@ -19,8 +19,9 @@ These are some steps you can take to help you understand what this project is an
 - [What is json:api and why should I use it?](https://nordicapis.com/the-benefits-of-using-json-api/)
 - [The json:api specification](http://jsonapi.org/format/)
 - [Demo [Video]](https://youtu.be/KAMuo6K7VcE)
-- [Our documentation](https://json-api-dotnet.github.io)
+- [Our documentation](https://json-api-dotnet.github.io/JsonApiDotNetCore/)
 - [Check out the example projects](https://github.com/json-api-dotnet/JsonApiDotNetCore/tree/master/src/Examples)
+- [Embercasts: Full Stack Ember with ASP .NET Core](https://www.embercasts.com/course/full-stack-ember-with-dotnet/watch/whats-in-this-course-cs)
 
 ## Related Projects
 
@@ -35,13 +36,13 @@ See the [examples](https://github.com/json-api-dotnet/JsonApiDotNetCore/tree/mas
 
 ## Installation And Usage
 
-See [the documentation](https://json-api-dotnet.github.io/#/) for detailed usage. 
+See [our documentation](https://json-api-dotnet.github.io/JsonApiDotNetCore/) for detailed usage.
 
 ### Models
 
 ```csharp
 public class Article : Identifiable
-{ 
+{
     [Attr("name")]
     public string Name { get; set; }
 }
@@ -52,17 +53,19 @@ public class Article : Identifiable
 ```csharp
 public class ArticlesController : JsonApiController<Article>
 {
-    public ArticlesController(
-        IJsonApiContext jsonApiContext,
-        IResourceService<Article> resourceService) 
-    : base(jsonApiContext, resourceService) { }
+        public ArticlesController(
+            IJsonApiOptions jsonApiOptions,
+            IResourceService<Article> resourceService,
+            ILoggerFactory loggerFactory)
+            : base(jsonApiOptions, resourceService, loggerFactory)
+        { }
 }
 ```
 
 ### Middleware
 
 ```csharp
-public class Startup 
+public class Startup
 {
     public IServiceProvider ConfigureServices(IServiceCollection services) {
         services.AddJsonApi<AppDbContext>();
@@ -78,7 +81,7 @@ public class Startup
 
 ### Development
 
-Restore all nuget packages with:
+Restore all NuGet packages with:
 
 ```bash
 dotnet restore
@@ -86,16 +89,10 @@ dotnet restore
 
 #### Testing
 
-Running tests locally requires access to a postgresql database.  
-If you have docker installed, this can be propped up via: 
+Running tests locally requires access to a PostgreSQL database.  If you have docker installed, this can be propped up via:
 
 ```bash
-docker run --rm --name jsonapi-dotnet-core-testing \
-  -e POSTGRES_DB=JsonApiDotNetCoreExample \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 5432:5432 \
-  postgres
+docker run --rm --name jsonapi-dotnet-core-testing  -e POSTGRES_DB=JsonApiDotNetCoreExample -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:12.0
 ```
 
 And then to run the tests:
@@ -111,3 +108,16 @@ Sometimes the compiled files can be dirty / corrupt from other branches / failed
 ```bash
 dotnet clean
 ```
+
+#### Compiler warnings
+
+The `Release` build configuration is set to fail on warnings. That means when submitting a PR there shouldn't be any compiler warnings because the CI build it set to `Release`.
+
+## Compatibility
+
+A lot of changes were introduced in v4.0.0, the following chart should help you with compatibility issues between .NET Core versions
+
+| .NET Core Version | JADNC Version |
+| ----------------- | ------------- |
+| 2.*               | v3.*          |
+| 3.*               | v4.*          |

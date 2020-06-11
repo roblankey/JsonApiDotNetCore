@@ -1,21 +1,17 @@
-using JsonApiDotNetCore.Extensions;
 using Microsoft.EntityFrameworkCore;
 
 namespace JsonApiDotNetCore.Data
 {
-    public class DbContextResolver<TContext> : IDbContextResolver
-        where TContext : DbContext
+    public sealed class DbContextResolver<TDbContext> : IDbContextResolver
+        where TDbContext : DbContext
     {
-        private readonly TContext _context;
+        private readonly TDbContext _context;
 
-        public DbContextResolver(TContext context)
+        public DbContextResolver(TDbContext context)
         {
             _context = context;
         }
 
         public DbContext GetContext() => _context;
-
-        public DbSet<TEntity> GetDbSet<TEntity>() where TEntity : class
-            => _context.GetDbSet<TEntity>();
     }
 }

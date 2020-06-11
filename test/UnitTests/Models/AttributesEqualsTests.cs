@@ -1,9 +1,9 @@
-﻿using JsonApiDotNetCore.Models;
+using JsonApiDotNetCore.Models;
 using Xunit;
 
 namespace UnitTests.Models
 {
-    public class AttributesEqualsTests
+    public sealed class AttributesEqualsTests
     {
         [Fact]
         public void HasManyAttribute_Equals_Returns_True_When_Same_Name()
@@ -60,7 +60,7 @@ namespace UnitTests.Models
         }
 
         [Fact]
-        public void HasManyAttribute_Doesnt_Equal_HasOneAttribute_With_Same_Name()
+        public void HasManyAttribute_Does_Not_Equal_HasOneAttribute_With_Same_Name()
         {
             RelationshipAttribute a = new HasManyAttribute("test");
             RelationshipAttribute b = new HasOneAttribute("test");

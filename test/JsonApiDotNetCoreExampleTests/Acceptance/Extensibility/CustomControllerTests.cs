@@ -1,7 +1,11 @@
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using Bogus;
+using JsonApiDotNetCore;
+using JsonApiDotNetCore.Models.JsonApiDocuments;
 using JsonApiDotNetCoreExample;
 using JsonApiDotNetCoreExample.Data;
 using JsonApiDotNetCoreExample.Models;
@@ -15,11 +19,11 @@ using Person = JsonApiDotNetCoreExample.Models.Person;
 namespace JsonApiDotNetCoreExampleTests.Acceptance.Extensibility
 {
     [Collection("WebHostCollection")]
-    public class CustomControllerTests
+    public sealed class CustomControllerTests
     {
-        private TestFixture<TestStartup> _fixture;
-        private Faker<TodoItem> _todoItemFaker;
-        private Faker<Person> _personFaker;
+        private readonly TestFixture<TestStartup> _fixture;
+        private readonly Faker<TodoItem> _todoItemFaker;
+        private readonly Faker<Person> _personFaker;
 
         public CustomControllerTests(TestFixture<TestStartup> fixture)
         {
@@ -35,20 +39,20 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Extensibility
         [Fact]
         public async Task NonJsonApiControllers_DoNotUse_Dasherized_Routes()
         {
-            // arrange
+            // Arrange
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
             var httpMethod = new HttpMethod("GET");
-            var route = $"testValues";
+            var route = "testValues";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
-            
-            // assert
+
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
@@ -57,18 +61,18 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Extensibility
         {
             // Arrange
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
             var httpMethod = new HttpMethod("GET");
-            var route = $"/custom/route/todo-items";
+            var route = "/custom/route/todoItems";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
@@ -84,18 +88,18 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Extensibility
             await context.SaveChangesAsync();
 
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
             var httpMethod = new HttpMethod("GET");
-            var route = $"/custom/route/todo-items/{todoItem.Id}";
+            var route = $"/custom/route/todoItems/{todoItem.Id}";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act
+            // Act
             var response = await client.SendAsync(request);
 
-            // assert
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
@@ -110,24 +114,65 @@ namespace JsonApiDotNetCoreExampleTests.Acceptance.Extensibility
             context.TodoItems.Add(todoItem);
             await context.SaveChangesAsync();
 
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+            var builder = new WebHostBuilder().UseStartup<TestStartup>();
             var httpMethod = new HttpMethod("GET");
-            var route = $"/custom/route/todo-items/{todoItem.Id}";
+            var route = $"/custom/route/todoItems/{todoItem.Id}";
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
             var request = new HttpRequestMessage(httpMethod, route);
 
-            // act & assert
+            // Act
             var response = await client.SendAsync(request);
+
+            // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
             var body = await response.Content.ReadAsStringAsync();
             var deserializedBody = JsonConvert.DeserializeObject<JObject>(body);
 
-            var result =  deserializedBody["data"]["relationships"]["owner"]["links"]["related"].ToString();
-            Assert.EndsWith($"{route}/owner", deserializedBody["data"]["relationships"]["owner"]["links"]["related"].ToString());
+            var result = deserializedBody["data"]["relationships"]["owner"]["links"]["related"].ToString();
+            Assert.EndsWith($"{route}/owner", result);
+        }
+
+        [Fact]
+        public async Task ApiController_attribute_transforms_NotFound_action_result_without_arguments_into_ProblemDetails()
+        {
+            // Arrange
+            var builder = new WebHostBuilder().UseStartup<TestStartup>();
+            var route = "/custom/route/todoItems/99999999";
+
+            var requestBody = new
+            {
+                data = new
+                {
+                    type = "todoItems",
+                    id = "99999999",
+                    attributes = new Dictionary<string, object>
+                    {
+                        ["ordinal"] = 1
+                    }
+                }
+            };
+
+            var content = JsonConvert.SerializeObject(requestBody);
+
+            var server = new TestServer(builder);
+            var client = server.CreateClient();
+            var request = new HttpRequestMessage(HttpMethod.Patch, route) {Content = new StringContent(content)};
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(HeaderConstants.MediaType);
+
+            // Act
+            var response = await client.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+            var responseBody = await response.Content.ReadAsStringAsync();
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(responseBody);
+
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal("https://tools.ietf.org/html/rfc7231#section-6.5.4", errorDocument.Errors[0].Links.About);
         }
     }
 }

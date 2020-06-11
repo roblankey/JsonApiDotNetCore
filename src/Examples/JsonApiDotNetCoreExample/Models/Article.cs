@@ -4,18 +4,23 @@ using JsonApiDotNetCore.Models;
 
 namespace JsonApiDotNetCoreExample.Models
 {
-    public class Article : Identifiable
+    public sealed class Article : Identifiable
     {
-        [Attr("name")]
+        [Attr]
         public string Name { get; set; }
 
-        [HasOne("author")]
+        [HasOne]
         public Author Author { get; set; }
         public int AuthorId { get; set; }
 
         [NotMapped]
         [HasManyThrough(nameof(ArticleTags))]
-        public List<Tag> Tags { get; set; }
-        public List<ArticleTag> ArticleTags { get; set; }
+        public ISet<Tag> Tags { get; set; }
+        public ISet<ArticleTag> ArticleTags { get; set; }
+
+        [NotMapped]
+        [HasManyThrough(nameof(IdentifiableArticleTags))]
+        public ICollection<Tag> IdentifiableTags { get; set; }
+        public ICollection<IdentifiableArticleTag> IdentifiableArticleTags { get; set; }
     }
 }

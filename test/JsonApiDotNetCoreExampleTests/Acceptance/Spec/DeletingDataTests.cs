@@ -1,55 +1,55 @@
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Bogus;
+using JsonApiDotNetCore.Models.JsonApiDocuments;
 using JsonApiDotNetCoreExample;
 using JsonApiDotNetCoreExample.Data;
-using JsonApiDotNetCoreExample.Models;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Newtonsoft.Json;
 using Xunit;
 
 namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec
 {
     [Collection("WebHostCollection")]
-    public class DeletingDataTests
+    public sealed class DeletingDataTests
     {
-        private TestFixture<TestStartup> _fixture;
-        private AppDbContext _context;
-        private Faker<TodoItem> _todoItemFaker;
+        private readonly AppDbContext _context;
 
         public DeletingDataTests(TestFixture<TestStartup> fixture)
         {
-            _fixture = fixture;
             _context = fixture.GetService<AppDbContext>();
-            _todoItemFaker = new Faker<TodoItem>()
-                .RuleFor(t => t.Description, f => f.Lorem.Sentence())
-                .RuleFor(t => t.Ordinal, f => f.Random.Number())
-                .RuleFor(t => t.CreatedDate, f => f.Date.Past());
         }
 
         [Fact]
         public async Task Respond_404_If_EntityDoesNotExist()
         {
-            // arrange
-            var maxPersonId = _context.TodoItems.LastOrDefault()?.Id ?? 0;
-            var todoItem = _todoItemFaker.Generate();
+            // Arrange
+            _context.TodoItems.RemoveRange(_context.TodoItems);
+            await _context.SaveChangesAsync();
+
             var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
+                .UseStartup<TestStartup>();
 
             var server = new TestServer(builder);
             var client = server.CreateClient();
 
             var httpMethod = new HttpMethod("DELETE");
-            var route = $"/api/v1/todo-items/{maxPersonId + 100}";
+            var route = "/api/v1/todoItems/123";
             var request = new HttpRequestMessage(httpMethod, route);
 
             // Act
             var response = await client.SendAsync(request);
 
             // Assert
+            var body = await response.Content.ReadAsStringAsync();
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(body);
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal(HttpStatusCode.NotFound, errorDocument.Errors[0].StatusCode);
+            Assert.Equal("The requested resource does not exist.", errorDocument.Errors[0].Title);
+            Assert.Equal("Resource of type 'todoItems' with id '123' does not exist.",errorDocument.Errors[0].Detail);
         }
     }
 }

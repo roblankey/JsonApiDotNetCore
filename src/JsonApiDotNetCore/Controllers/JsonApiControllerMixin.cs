@@ -1,49 +1,26 @@
 using System.Collections.Generic;
-using System.Linq;
-using JsonApiDotNetCore.Internal;
+using JsonApiDotNetCore.Middleware;
+using JsonApiDotNetCore.Models.JsonApiDocuments;
 using Microsoft.AspNetCore.Mvc;
 
 namespace JsonApiDotNetCore.Controllers
 {
+    [ServiceFilter(typeof(IQueryParameterActionFilter))]
     public abstract class JsonApiControllerMixin : ControllerBase
     {
-        protected IActionResult Forbidden()
-        {
-            return new StatusCodeResult(403);
-        }
-
         protected IActionResult Error(Error error)
         {
-            var errorCollection = new ErrorCollection
-            {
-                Errors = new List<Error> { error }
-            };
-
-            return new ObjectResult(errorCollection)
-            {
-                StatusCode = error.StatusCode
-            };
+            return Error(new[] {error});
         }
 
-        protected IActionResult Errors(ErrorCollection errors)
+        protected IActionResult Error(IEnumerable<Error> errors)
         {
-            return new ObjectResult(errors)
+            var document = new ErrorDocument(errors);
+
+            return new ObjectResult(document)
             {
-                StatusCode = GetErrorStatusCode(errors)
+                StatusCode = (int) document.GetErrorStatusCode()
             };
-        }
-
-        private int GetErrorStatusCode(ErrorCollection errors)
-        {
-            var statusCodes = errors.Errors
-                .Select(e => e.StatusCode)
-                .Distinct()
-                .ToList();
-
-            if (statusCodes.Count == 1)
-                return statusCodes[0];
-
-            return int.Parse(statusCodes.Max().ToString()[0] + "00");
         }
     }
 }

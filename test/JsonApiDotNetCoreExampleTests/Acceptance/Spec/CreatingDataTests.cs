@@ -1,590 +1,437 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using Bogus;
-using JsonApiDotNetCore.Serialization;
-using JsonApiDotNetCore.Services;
-using JsonApiDotNetCoreExample;
-using JsonApiDotNetCoreExample.Data;
+using JsonApiDotNetCore.Models.JsonApiDocuments;
 using JsonApiDotNetCoreExample.Models;
-using JsonApiDotNetCoreExampleTests.Startups;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.TestHost;
+using JsonApiDotNetCoreExampleTests.Helpers.Models;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
 using Xunit;
+using Person = JsonApiDotNetCoreExample.Models.Person;
 
 namespace JsonApiDotNetCoreExampleTests.Acceptance.Spec
 {
-    [Collection("WebHostCollection")]
-    public class CreatingDataTests
+    public sealed class CreatingDataTests : FunctionalTestCollection<StandardApplicationFactory>
     {
-        private TestFixture<TestStartup> _fixture;
-        private IJsonApiContext _jsonApiContext;
-        private Faker<TodoItem> _todoItemFaker;
+        private readonly Faker<TodoItem> _todoItemFaker;
+        private readonly Faker<Person> _personFaker;
 
-        public CreatingDataTests(TestFixture<TestStartup> fixture)
+        public CreatingDataTests(StandardApplicationFactory factory) : base(factory)
         {
-            _fixture = fixture;
-            _jsonApiContext = fixture.GetService<IJsonApiContext>();
             _todoItemFaker = new Faker<TodoItem>()
-                .RuleFor(t => t.Description, f => f.Lorem.Sentence())
-                .RuleFor(t => t.Ordinal, f => f.Random.Number())
-                .RuleFor(t => t.CreatedDate, f => f.Date.Past());
+                    .RuleFor(t => t.Description, f => f.Lorem.Sentence())
+                    .RuleFor(t => t.Ordinal, f => f.Random.Number())
+                    .RuleFor(t => t.CreatedDate, f => f.Date.Past());
+            _personFaker = new Faker<Person>()
+                    .RuleFor(t => t.FirstName, f => f.Name.FirstName())
+                    .RuleFor(t => t.LastName, f => f.Name.LastName());
         }
 
         [Fact]
-        public async Task Can_Create_Guid_Identifiable_Entity()
+        public async Task CreateResource_ModelWithEntityFrameworkInheritance_IsCreated()
         {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
-            var httpMethod = new HttpMethod("POST");
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
+            // Arrange
+            var serializer = GetSerializer<SuperUser>(e => new { e.SecurityLevel, e.Username, e.Password });
+            var superUser = new SuperUser(_dbContext) { SecurityLevel = 1337, Username = "Super", Password = "User" };
 
-            var context = _fixture.GetService<AppDbContext>();
+            // Act
+            var (body, response) = await Post("/api/v1/superUsers", serializer.Serialize(superUser));
 
-            var owner = new JsonApiDotNetCoreExample.Models.Person();
-            context.People.Add(owner);
-            await context.SaveChangesAsync();
-
-            var route = "/api/v1/todo-collections";
-            var request = new HttpRequestMessage(httpMethod, route);
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-collections",
-                    relationships = new
-                    {
-                        owner = new
-                        {
-                            data = new
-                            {
-                                type = "people",
-                                id = owner.Id.ToString()
-                            }
-                        }
-                    }
-                }
-            };
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var createdSuperUser = _deserializer.DeserializeSingle<SuperUser>(body).Data;
+            var first = _dbContext.Set<SuperUser>().FirstOrDefault(e => e.Id.Equals(createdSuperUser.Id));
+            Assert.NotNull(first);
         }
 
         [Fact]
-        public async Task Cannot_Create_Entity_With_Client_Generate_Id()
+        public async Task CreateResource_GuidResource_IsCreated()
         {
-            // arrange
-            var context = _fixture.GetService<AppDbContext>();
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
-            var httpMethod = new HttpMethod("POST");
-            var route = "/api/v1/todo-items";
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-            var request = new HttpRequestMessage(httpMethod, route);
+            // Arrange
+            var serializer = GetSerializer<TodoItemCollection>(e => new { }, e => new { e.Owner });
+            var owner = new Person();
+            _dbContext.People.Add(owner);
+            _dbContext.SaveChanges();
+            var todoItemCollection = new TodoItemCollection { Owner = owner };
+
+            // Act
+            var (_, response) = await Post("/api/v1/todoCollections", serializer.Serialize(todoItemCollection));
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+        }
+
+        [Fact]
+        public async Task ClientGeneratedId_IntegerIdAndNotEnabled_IsForbidden()
+        {
+            // Arrange
+            var serializer = GetSerializer<TodoItem>(e => new { e.Description, e.Ordinal, e.CreatedDate });
             var todoItem = _todoItemFaker.Generate();
             const int clientDefinedId = 9999;
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-items",
-                    id = $"{clientDefinedId}",
-                    attributes = new
-                    {
-                        description = todoItem.Description,
-                        ordinal = todoItem.Ordinal,
-                        createdDate = DateTime.Now
-                    }
-                }
-            };
+            todoItem.Id = clientDefinedId;
 
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems", serializer.Serialize(todoItem));
 
-            // act
-            var response = await client.SendAsync(request);
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Forbidden, response);
 
-            // assert
-            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(body);
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal(HttpStatusCode.Forbidden, errorDocument.Errors[0].StatusCode);
+            Assert.Equal("Specifying the resource id in POST requests is not allowed.", errorDocument.Errors[0].Title);
+            Assert.Null(errorDocument.Errors[0].Detail);
         }
 
         [Fact]
-        public async Task Can_Create_Entity_With_Client_Defined_Id_If_Configured()
+        public async Task CreateWithRelationship_HasMany_IsCreated()
         {
-            // arrange
-            var context = _fixture.GetService<AppDbContext>();
-            var builder = new WebHostBuilder()
-                .UseStartup<ClientGeneratedIdsStartup>();
-            var httpMethod = new HttpMethod("POST");
-            var route = "/api/v1/todo-items";
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-            var request = new HttpRequestMessage(httpMethod, route);
+            // Arrange
+            var serializer = GetSerializer<TodoItemCollection>(e => new { }, e => new { e.TodoItems });
             var todoItem = _todoItemFaker.Generate();
-            const int clientDefinedId = 9999;
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-items",
-                    id = $"{clientDefinedId}",
-                    attributes = new
-                    {
-                        description = todoItem.Description,
-                        ordinal = todoItem.Ordinal,
-                        createdDate = DateTime.Now
-                    }
-                }
-            };
+            _dbContext.TodoItems.Add(todoItem);
+            _dbContext.SaveChanges();
+            var todoCollection = new TodoItemCollection { TodoItems = new HashSet<TodoItem> { todoItem } };
 
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
+            // Act
+            var (body, response) = await Post("/api/v1/todoCollections", serializer.Serialize(todoCollection));
 
-            // act
-            var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-            var deserializedBody = (TodoItem)_fixture.GetService<IJsonApiDeSerializer>().Deserialize(body);
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            Assert.Equal(clientDefinedId, deserializedBody.Id);
-        }
-
-
-        [Fact]
-        public async Task Can_Create_Guid_Identifiable_Entity_With_Client_Defined_Id_If_Configured()
-        {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<ClientGeneratedIdsStartup>();
-            var httpMethod = new HttpMethod("POST");
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-
-            var context = _fixture.GetService<AppDbContext>();
-
-            var owner = new JsonApiDotNetCoreExample.Models.Person();
-            context.People.Add(owner);
-            await context.SaveChangesAsync();
-
-            var route = "/api/v1/todo-collections";
-            var request = new HttpRequestMessage(httpMethod, route);
-            var clientDefinedId = Guid.NewGuid();
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-collections",
-                    id = $"{clientDefinedId}",
-                    relationships = new
-                    {
-                        owner = new
-                        {
-                            data = new
-                            {
-                                type = "people",
-                                id = owner.Id.ToString()
-                            }
-                        }
-                    }
-                }
-            };
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-            var deserializedBody = (TodoItemCollection)_fixture.GetService<IJsonApiDeSerializer>().Deserialize(body);
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            Assert.Equal(clientDefinedId, deserializedBody.Id);
-        }
-
-        [Fact]
-        public async Task Can_Create_And_Set_HasMany_Relationships()
-        {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
-            var httpMethod = new HttpMethod("POST");
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-
-            var context = _fixture.GetService<AppDbContext>();
-
-            var owner = new JsonApiDotNetCoreExample.Models.Person();
-            var todoItem = new TodoItem();
-            todoItem.Owner = owner;
-            context.People.Add(owner);
-            context.TodoItems.Add(todoItem);
-            await context.SaveChangesAsync();
-
-            var route = "/api/v1/todo-collections";
-            var request = new HttpRequestMessage(httpMethod, route);
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-collections",
-                    relationships = new Dictionary<string, dynamic>
-                    {
-                        {  "owner",  new {
-                            data = new
-                            {
-                                type = "people",
-                                id = owner.Id.ToString()
-                            }
-                        } },
-                        {  "todo-items", new {
-                            data = new dynamic[]
-                            {
-                                new {
-                                    type = "todo-items",
-                                    id = todoItem.Id.ToString()
-                                }
-                            }
-                        } }
-                    }
-                }
-            };
-
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-            var deserializedBody = (TodoItemCollection)_fixture.GetService<IJsonApiDeSerializer>().Deserialize(body);
-            var newId = deserializedBody.Id;
-
-            context = _fixture.GetService<AppDbContext>();
-            var contextCollection = context.TodoItemCollections
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemCollectionClient>(body).Data;
+            var contextCollection = GetDbContext().TodoItemCollections.AsNoTracking()
                 .Include(c => c.Owner)
                 .Include(c => c.TodoItems)
-                .SingleOrDefault(c => c.Id == newId);
+                .SingleOrDefault(c => c.Id == responseItem.Id);
 
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            Assert.Equal(owner.Id, contextCollection.OwnerId);
             Assert.NotEmpty(contextCollection.TodoItems);
+            Assert.Equal(todoItem.Id, contextCollection.TodoItems.First().Id);
         }
 
         [Fact]
-        public async Task Can_Create_With_HasMany_Relationship_And_Include_Result()
+        public async Task CreateWithRelationship_HasManyAndInclude_IsCreatedAndIncludes()
         {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
-            var httpMethod = new HttpMethod("POST");
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
+            // Arrange
+            var serializer = GetSerializer<TodoItemCollection>(e => new { }, e => new { e.TodoItems, e.Owner });
+            var owner = new Person();
+            var todoItem = new TodoItem { Owner = owner, Description = "Description" };
+            _dbContext.People.Add(owner);
+            _dbContext.TodoItems.Add(todoItem);
+            _dbContext.SaveChanges();
+            var todoCollection = new TodoItemCollection { Owner = owner, TodoItems = new HashSet<TodoItem> { todoItem } };
 
-            var context = _fixture.GetService<AppDbContext>();
+            // Act
+            var (body, response) = await Post("/api/v1/todoCollections?include=todoItems", serializer.Serialize(todoCollection));
 
-            var owner = new JsonApiDotNetCoreExample.Models.Person();
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemCollectionClient>(body).Data;
+            Assert.NotNull(responseItem);
+            Assert.NotEmpty(responseItem.TodoItems);
+            Assert.Equal(todoItem.Description, responseItem.TodoItems.Single().Description);
+        }
+
+        [Fact]
+        public async Task CreateWithRelationship_HasManyAndIncludeAndSparseFieldset_IsCreatedAndIncludes()
+        {
+            // Arrange
+            var serializer = GetSerializer<TodoItemCollection>(e => new { e.Name }, e => new { e.TodoItems, e.Owner });
+            var owner = new Person();
+            var todoItem = new TodoItem { Owner = owner, Ordinal = 123, Description = "Description" };
+            _dbContext.People.Add(owner);
+            _dbContext.TodoItems.Add(todoItem);
+            _dbContext.SaveChanges();
+            var todoCollection = new TodoItemCollection {Owner = owner, Name = "Jack", TodoItems = new HashSet<TodoItem> {todoItem}};
+
+            // Act
+            var (body, response) = await Post("/api/v1/todoCollections?include=todoItems&fields=name&fields[todoItems]=ordinal", serializer.Serialize(todoCollection));
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemCollectionClient>(body).Data;
+            Assert.NotNull(responseItem);
+            Assert.Equal(todoCollection.Name, responseItem.Name);
+
+            Assert.NotEmpty(responseItem.TodoItems);
+            Assert.Equal(todoItem.Ordinal, responseItem.TodoItems.Single().Ordinal);
+            Assert.Null(responseItem.TodoItems.Single().Description);
+        }
+
+        [Fact]
+        public async Task CreateWithRelationship_HasOne_IsCreated()
+        {
+            // Arrange
+            var serializer = GetSerializer<TodoItem>(attributes: ti => new { }, relationships: ti => new { ti.Owner });
             var todoItem = new TodoItem();
+            var owner = new Person();
+            _dbContext.People.Add(owner);
+            _dbContext.SaveChanges();
             todoItem.Owner = owner;
-            todoItem.Description = "Description";
-            context.People.Add(owner);
-            context.TodoItems.Add(todoItem);
-            await context.SaveChangesAsync();
 
-            var route = "/api/v1/todo-collections?include=todo-items";
-            var request = new HttpRequestMessage(httpMethod, route);
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-collections",
-                    relationships = new Dictionary<string, dynamic>
-                    {
-                        {  "owner",  new {
-                            data = new
-                            {
-                                type = "people",
-                                id = owner.Id.ToString()
-                            }
-                        } },
-                        {  "todo-items", new {
-                            data = new dynamic[]
-                            {
-                                new {
-                                    type = "todo-items",
-                                    id = todoItem.Id.ToString()
-                                }
-                            }
-                        } }
-                    }
-                }
-            };
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems", serializer.Serialize(todoItem));
 
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var body = await response.Content.ReadAsStringAsync();
-            var collectionResult = _fixture.GetService<IJsonApiDeSerializer>().Deserialize<TodoItemCollection>(body);
-
-            Assert.NotNull(collectionResult);
-            Assert.NotEmpty(collectionResult.TodoItems);
-            Assert.Equal(todoItem.Description, collectionResult.TodoItems.Single().Description);
-        }
-
-        [Fact]
-        public async Task Can_Create_And_Set_HasOne_Relationships()
-        {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
-            var httpMethod = new HttpMethod("POST");
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-
-            var context = _fixture.GetService<AppDbContext>();
-
-            var todoItem = new TodoItem();
-            var owner = new JsonApiDotNetCoreExample.Models.Person();
-            context.People.Add(owner);
-            await context.SaveChangesAsync();
-
-            var route = "/api/v1/todo-items";
-            var request = new HttpRequestMessage(httpMethod, route);
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-items",
-                    relationships = new Dictionary<string, dynamic>
-                    {
-                        {  "owner",  new {
-                            data = new
-                            {
-                                type = "people",
-                                id = owner.Id.ToString()
-                            }
-                        } }
-                    }
-                }
-            };
-
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var deserializedBody = (TodoItem)_fixture.GetService<IJsonApiDeSerializer>().Deserialize(body);
-            var newId = deserializedBody.Id;
-
-            context = _fixture.GetService<AppDbContext>();
-            var todoItemResult = context.TodoItems
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemClient>(body).Data;
+            var todoItemResult = GetDbContext().TodoItems.AsNoTracking()
                 .Include(c => c.Owner)
-                .SingleOrDefault(c => c.Id == newId);
-
+                .SingleOrDefault(c => c.Id == responseItem.Id);
             Assert.Equal(owner.Id, todoItemResult.OwnerId);
         }
 
         [Fact]
-        public async Task Can_Create_With_HasOne_Relationship_And_Include_Result()
+        public async Task CreateWithRelationship_HasOneAndInclude_IsCreatedAndIncludes()
         {
-            // arrange
-            var builder = new WebHostBuilder().UseStartup<Startup>();
-
-            var httpMethod = new HttpMethod("POST");
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-
-            var context = _fixture.GetService<AppDbContext>();
-
+            // Arrange
+            var serializer = GetSerializer<TodoItem>(attributes: ti => new { }, relationships: ti => new { ti.Owner });
             var todoItem = new TodoItem();
-            var owner = new JsonApiDotNetCoreExample.Models.Person
-            {
-                FirstName = "Alice"
-            };
-            context.People.Add(owner);
+            var owner = new Person { FirstName = "Alice" };
+            _dbContext.People.Add(owner);
+            _dbContext.SaveChanges();
+            todoItem.Owner = owner;
 
-            await context.SaveChangesAsync();
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems?include=owner", serializer.Serialize(todoItem));
 
-            var route = "/api/v1/todo-items?include=owner";
-            var request = new HttpRequestMessage(httpMethod, route);
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-items",
-                    relationships = new Dictionary<string, dynamic>
-                    {
-                        {  "owner",  new {
-                            data = new
-                            {
-                                type = "people",
-                                id = owner.Id.ToString()
-                            }
-                        } }
-                    }
-                }
-            };
-
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var todoItemResult = (TodoItem)_fixture.GetService<IJsonApiDeSerializer>().Deserialize<TodoItem>(body);
-            Assert.NotNull(todoItemResult);
-            Assert.NotNull(todoItemResult.Owner);
-            Assert.Equal(owner.FirstName, todoItemResult.Owner.FirstName);
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemClient>(body).Data;
+            Assert.NotNull(responseItem);
+            Assert.NotNull(responseItem.Owner);
+            Assert.Equal(owner.FirstName, responseItem.Owner.FirstName);
         }
 
         [Fact]
-        public async Task Can_Create_And_Set_HasOne_Relationships_From_Independent_Side()
+        public async Task CreateWithRelationship_HasOneAndIncludeAndSparseFieldset_IsCreatedAndIncludes()
         {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<ClientGeneratedIdsStartup>();
-            var httpMethod = new HttpMethod("POST");
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
+            // Arrange
+            var serializer = GetSerializer<TodoItem>(attributes: ti => new { ti.Ordinal }, relationships: ti => new { ti.Owner });
+            var todoItem = new TodoItem
+            {
+                Ordinal = 123,
+                Description = "some"
+            };
+            var owner = new Person { FirstName = "Alice", LastName = "Cooper" };
+            _dbContext.People.Add(owner);
+            _dbContext.SaveChanges();
+            todoItem.Owner = owner;
 
-            var context = _fixture.GetService<AppDbContext>();
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems?include=owner&fields=ordinal&fields[owner]=firstName", serializer.Serialize(todoItem));
 
-            var person = new JsonApiDotNetCoreExample.Models.Person();
-            context.People.Add(person);
-            await context.SaveChangesAsync();
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemClient>(body).Data;
 
-            var route = "/api/v1/person-roles";
-            var request = new HttpRequestMessage(httpMethod, route);
+            Assert.NotNull(responseItem);
+            Assert.Equal(todoItem.Ordinal, responseItem.Ordinal);
+            Assert.Null(responseItem.Description);
+
+            Assert.NotNull(responseItem.Owner);
+            Assert.Equal(owner.FirstName, responseItem.Owner.FirstName);
+            Assert.Null(responseItem.Owner.LastName);
+        }
+
+        [Fact]
+        public async Task CreateWithRelationship_HasOneFromIndependentSide_IsCreated()
+        {
+            // Arrange
+            var serializer = GetSerializer<PersonRole>(pr => new { }, pr => new { pr.Person });
+            var person = new Person();
+            _dbContext.People.Add(person);
+            _dbContext.SaveChanges();
+            var personRole = new PersonRole { Person = person };
+
+            // Act
+            var (body, response) = await Post("/api/v1/personRoles", serializer.Serialize(personRole));
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<PersonRole>(body).Data;
+            var personRoleResult = _dbContext.PersonRoles.AsNoTracking()
+                .Include(c => c.Person)
+                .SingleOrDefault(c => c.Id == responseItem.Id);
+            Assert.NotEqual(0, responseItem.Id);
+            Assert.Equal(person.Id, personRoleResult.Person.Id);
+        }
+
+        [Fact]
+        public async Task CreateResource_SimpleResource_HeaderLocationsAreCorrect()
+        {
+            // Arrange
+            var serializer = GetSerializer<TodoItem>(ti => new { ti.CreatedDate, ti.Description, ti.Ordinal });
+            var todoItem = _todoItemFaker.Generate();
+
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems", serializer.Serialize(todoItem));
+            var responseItem = _deserializer.DeserializeSingle<TodoItemClient>(body).Data;
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            Assert.Equal($"/api/v1/todoItems/{responseItem.Id}", response.Headers.Location.ToString());
+        }
+
+        [Fact]
+        public async Task CreateResource_EntityTypeMismatch_IsConflict()
+        {
+            // Arrange
+            string content = JsonConvert.SerializeObject(new
+            {
+                data = new
+                {
+                    type = "people"
+                }
+            });
+
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems", content);
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Conflict, response);
+
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(body);
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal(HttpStatusCode.Conflict, errorDocument.Errors[0].StatusCode);
+            Assert.Equal("Resource type mismatch between request body and endpoint URL.", errorDocument.Errors[0].Title);
+            Assert.Equal("Expected resource of type 'todoItems' in POST request body at endpoint '/api/v1/todoItems', instead of 'people'.", errorDocument.Errors[0].Detail);
+        }
+
+        [Fact]
+        public async Task CreateResource_UnknownEntityType_Fails()
+        {
+            // Arrange
+            string content = JsonConvert.SerializeObject(new
+            {
+                data = new
+                {
+                    type = "something"
+                }
+            });
+
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems", content);
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.UnprocessableEntity, response);
+
+            var errorDocument = JsonConvert.DeserializeObject<ErrorDocument>(body);
+            Assert.Single(errorDocument.Errors);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, errorDocument.Errors[0].StatusCode);
+            Assert.Equal("Failed to deserialize request body: Payload includes unknown resource type.", errorDocument.Errors[0].Title);
+            Assert.StartsWith("The resource 'something' is not registered on the resource graph.", errorDocument.Errors[0].Detail);
+            Assert.Contains("Request body: <<", errorDocument.Errors[0].Detail);
+        }
+
+        [Fact]
+        public async Task CreateRelationship_ToOneWithImplicitRemove_IsCreated()
+        {
+            // Arrange
+            var serializer = GetSerializer<Person>(e => new { e.FirstName }, e => new { e.Passport });
+            var passport = new Passport(_dbContext);
+            var currentPerson = _personFaker.Generate();
+            currentPerson.Passport = passport;
+            _dbContext.People.Add(currentPerson);
+            _dbContext.SaveChanges();
+            var newPerson = _personFaker.Generate();
+            newPerson.Passport = passport;
+
+            // Act
+            var (body, response) = await Post("/api/v1/people", serializer.Serialize(newPerson));
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<Person>(body).Data;
+            var newPersonDb = _dbContext.People.AsNoTracking().Where(p => p.Id == responseItem.Id).Include(e => e.Passport).Single();
+            Assert.NotNull(newPersonDb.Passport);
+            Assert.Equal(passport.Id, newPersonDb.Passport.Id);
+        }
+
+        [Fact]
+        public async Task CreateRelationship_ToManyWithImplicitRemove_IsCreated()
+        {
+            // Arrange
+            var serializer = GetSerializer<Person>(e => new { e.FirstName }, e => new { e.TodoItems });
+            var currentPerson = _personFaker.Generate();
+            var todoItems = _todoItemFaker.Generate(3);
+            currentPerson.TodoItems = todoItems.ToHashSet();
+            _dbContext.Add(currentPerson);
+            _dbContext.SaveChanges();
+            var firstTd = todoItems[0];
+            var secondTd = todoItems[1];
+            var thirdTd = todoItems[2];
+
+            var newPerson = _personFaker.Generate();
+            newPerson.TodoItems = new HashSet<TodoItem> { firstTd, secondTd };
+
+            // Act
+            var (body, response) = await Post("/api/v1/people", serializer.Serialize(newPerson));
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<Person>(body).Data;
+            var newPersonDb = _dbContext.People.AsNoTracking().Where(p => p.Id == responseItem.Id).Include(e => e.TodoItems).Single();
+            var oldPersonDb = _dbContext.People.AsNoTracking().Where(p => p.Id == currentPerson.Id).Include(e => e.TodoItems).Single();
+            Assert.Equal(2, newPersonDb.TodoItems.Count);
+            Assert.Single(oldPersonDb.TodoItems);
+            Assert.NotNull(newPersonDb.TodoItems.SingleOrDefault(ti => ti.Id == firstTd.Id));
+            Assert.NotNull(newPersonDb.TodoItems.SingleOrDefault(ti => ti.Id == secondTd.Id));
+            Assert.NotNull(oldPersonDb.TodoItems.SingleOrDefault(ti => ti.Id == thirdTd.Id));
+        }
+    }
+
+
+    public sealed class CreatingDataWithClientEnabledIdTests : FunctionalTestCollection<ClientEnabledIdsApplicationFactory>
+    {
+        private readonly Faker<TodoItem> _todoItemFaker;
+
+        public CreatingDataWithClientEnabledIdTests(ClientEnabledIdsApplicationFactory factory) : base(factory)
+        {
+            _todoItemFaker = new Faker<TodoItem>()
+                    .RuleFor(t => t.Description, f => f.Lorem.Sentence())
+                    .RuleFor(t => t.Ordinal, f => f.Random.Number())
+                    .RuleFor(t => t.CreatedDate, f => f.Date.Past());
+        }
+
+        [Fact]
+        public async Task ClientGeneratedId_IntegerIdAndEnabled_IsCreated()
+        {
+            // Arrange
+            var serializer = GetSerializer<TodoItem>(e => new { e.Description, e.Ordinal, e.CreatedDate });
+            var todoItem = _todoItemFaker.Generate();
+            const int clientDefinedId = 9999;
+            todoItem.Id = clientDefinedId;
+
+            // Act
+            var (body, response) = await Post("/api/v1/todoItems", serializer.Serialize(todoItem));
+
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemClient>(body).Data;
+            Assert.Equal(clientDefinedId, responseItem.Id);
+        }
+
+        [Fact]
+        public async Task ClientGeneratedId_GuidIdAndEnabled_IsCreated()
+        {
+            // Arrange
+            var serializer = GetSerializer<TodoItemCollection>(e => new { }, e => new { e.Owner });
+            var owner = new Person();
+            _dbContext.People.Add(owner);
+            await _dbContext.SaveChangesAsync();
             var clientDefinedId = Guid.NewGuid();
-            var content = new
-            {
-                data = new
-                {
-                    type = "person-roles",
-                    relationships = new
-                    {
-                        person = new
-                        {
-                            data = new
-                            {
-                                type = "people",
-                                id = person.Id.ToString()
-                            }
-                        }
-                    }
-                }
-            };
+            var todoItemCollection = new TodoItemCollection { Owner = owner, OwnerId = owner.Id, Id = clientDefinedId };
 
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
+            // Act
+            var (body, response) = await Post("/api/v1/todoCollections", serializer.Serialize(todoItemCollection));
 
-            // act
-            var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var deserializedBody = (PersonRole)_fixture.GetService<IJsonApiDeSerializer>().Deserialize(body);
-            Assert.Equal(person.Id, deserializedBody.Person.Id);
-        }
-
-        [Fact]
-        public async Task ShouldReceiveLocationHeader_InResponse()
-        {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
-            var httpMethod = new HttpMethod("POST");
-            var route = "/api/v1/todo-items";
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-            var request = new HttpRequestMessage(httpMethod, route);
-            var todoItem = _todoItemFaker.Generate();
-            var content = new
-            {
-                data = new
-                {
-                    type = "todo-items",
-                    attributes = new
-                    {
-                        description = todoItem.Description,
-                        ordinal = todoItem.Ordinal,
-                        createdDate = DateTime.Now
-                    }
-                }
-            };
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-            var deserializedBody = (TodoItem)_fixture.GetService<IJsonApiDeSerializer>().Deserialize(body);
-
-            // assert
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            Assert.Equal($"/api/v1/todo-items/{deserializedBody.Id}", response.Headers.Location.ToString());
-        }
-
-        [Fact]
-        public async Task Respond_409_ToIncorrectEntityType()
-        {
-            // arrange
-            var builder = new WebHostBuilder()
-                .UseStartup<Startup>();
-            var httpMethod = new HttpMethod("POST");
-            var route = "/api/v1/todo-items";
-            var server = new TestServer(builder);
-            var client = server.CreateClient();
-            var request = new HttpRequestMessage(httpMethod, route);
-            var todoItem = _todoItemFaker.Generate();
-            var content = new
-            {
-                data = new
-                {
-                    type = "people",
-                    attributes = new
-                    {
-                        description = todoItem.Description,
-                        ordinal = todoItem.Ordinal,
-                        createdDate = DateTime.Now
-                    }
-                }
-            };
-            request.Content = new StringContent(JsonConvert.SerializeObject(content));
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.api+json");
-
-            // act
-            var response = await client.SendAsync(request);
-
-            // assert
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            // Assert
+            AssertEqualStatusCode(HttpStatusCode.Created, response);
+            var responseItem = _deserializer.DeserializeSingle<TodoItemCollectionClient>(body).Data;
+            Assert.Equal(clientDefinedId, responseItem.Id);
         }
     }
 }
